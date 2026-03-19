@@ -1,13 +1,41 @@
 import React, { useEffect } from 'react'
 import useStore from './stores/useStore'
 import ExecutiveDashboard from './components/dashboard/ExecutiveDashboard'
+import PriceActionPanel from './components/price/PriceActionPanel'
+import OptionsPanel from './components/options/OptionsPanel'
+import ShortPanel from './components/short/ShortPanel'
+import FundingPanel from './components/funding/FundingPanel'
+import OriginationPanel from './components/origination/OriginationPanel'
+import MacroPanel from './components/macro/MacroPanel'
+import ValuationPanel from './components/valuation/ValuationPanel'
+import TradeDecisionPanel from './components/trade/TradeDecisionPanel'
+import ForecastPanel from './components/forecast/ForecastPanel'
 import ScenarioLab from './components/scenario/ScenarioLab'
+import QuantPanel from './components/quant/QuantPanel'
+import BacktestPanel from './components/backtest/BacktestPanel'
+import RiskPanel from './components/risk/RiskPanel'
+import CatalystPanel from './components/catalyst/CatalystPanel'
+import ReportsPanel from './components/reports/ReportsPanel'
 import BotLab from './components/bots/BotLab'
 
 const TABS = [
-  { id: 'dashboard', label: 'Executive Dashboard' },
+  { id: 'dashboard', label: 'Dashboard' },
+  { id: 'price', label: 'Price Action' },
+  { id: 'options', label: 'Options/Vol' },
+  { id: 'short', label: 'Short/Squeeze' },
+  { id: 'funding', label: 'Funding' },
+  { id: 'origination', label: 'Origination' },
+  { id: 'macro', label: 'Macro/Credit' },
+  { id: 'valuation', label: 'Valuation' },
+  { id: 'trade', label: 'Trade Decision' },
+  { id: 'forecast', label: 'Forecast' },
   { id: 'scenario', label: 'Scenario Lab' },
-  { id: 'bots', label: 'Bot / Simulation Lab' },
+  { id: 'quant', label: 'Quant/PhD Lab' },
+  { id: 'catalyst', label: 'Catalysts' },
+  { id: 'backtest', label: 'Backtest' },
+  { id: 'risk', label: 'Risk/Sizing' },
+  { id: 'reports', label: 'Reports/Alerts' },
+  { id: 'bots', label: 'Bot Lab' },
 ]
 
 export default function App() {
@@ -15,7 +43,6 @@ export default function App() {
 
   useEffect(() => {
     fetchAnalysis()
-    // Auto-refresh every 60s
     const interval = setInterval(fetchAnalysis, 60000)
     return () => clearInterval(interval)
   }, [])
@@ -32,20 +59,36 @@ export default function App() {
         </div>
       </header>
 
-      {/* Tab Bar */}
-      <nav className="border-b border-terminal-border flex px-4 gap-1">
-        {TABS.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-            className={activeTab === tab.id ? 'tab-active' : 'tab-inactive'}>
-            {tab.label}
-          </button>
-        ))}
+      {/* Tab Bar — scrollable for all 17 tabs */}
+      <nav className="border-b border-terminal-border overflow-x-auto scrollbar-none">
+        <div className="flex px-2 gap-0.5 min-w-max">
+          {TABS.map(tab => (
+            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+              className={`${activeTab === tab.id ? 'tab-active' : 'tab-inactive'} whitespace-nowrap text-[11px] px-2.5 py-1.5`}>
+              {tab.label}
+            </button>
+          ))}
+        </div>
       </nav>
 
       {/* Content */}
       <main className="p-4 max-w-[1800px] mx-auto">
         {activeTab === 'dashboard' && <ExecutiveDashboard analysis={analysis} />}
+        {activeTab === 'price' && <PriceActionPanel analysis={analysis} />}
+        {activeTab === 'options' && <OptionsPanel analysis={analysis} />}
+        {activeTab === 'short' && <ShortPanel analysis={analysis} />}
+        {activeTab === 'funding' && <FundingPanel analysis={analysis} />}
+        {activeTab === 'origination' && <OriginationPanel analysis={analysis} />}
+        {activeTab === 'macro' && <MacroPanel analysis={analysis} />}
+        {activeTab === 'valuation' && <ValuationPanel analysis={analysis} />}
+        {activeTab === 'trade' && <TradeDecisionPanel analysis={analysis} />}
+        {activeTab === 'forecast' && <ForecastPanel analysis={analysis} />}
         {activeTab === 'scenario' && <ScenarioLab />}
+        {activeTab === 'quant' && <QuantPanel analysis={analysis} />}
+        {activeTab === 'catalyst' && <CatalystPanel analysis={analysis} />}
+        {activeTab === 'backtest' && <BacktestPanel />}
+        {activeTab === 'risk' && <RiskPanel analysis={analysis} />}
+        {activeTab === 'reports' && <ReportsPanel analysis={analysis} />}
         {activeTab === 'bots' && <BotLab />}
       </main>
 

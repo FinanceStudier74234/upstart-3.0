@@ -1,14 +1,16 @@
 """
-API Routes — Phase 8
-RESTful endpoints exposing all platform capabilities.
+API Routes — RESTful endpoints exposing all platform capabilities.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, Response
 from pydantic import BaseModel
 
 from backend.services.orchestrator import orchestrator
+from backend.services.alert_service import alert_service
+from backend.services.export_service import export_service
+from backend.services.websocket_manager import ws_manager
 
 router = APIRouter(prefix="/api/v1", tags=["UPST Hub"])
 
@@ -24,7 +26,12 @@ async def health():
 async def full_analysis():
     """Run complete analysis pipeline and return all engine outputs."""
     result = await orchestrator.run_full_analysis()
-    return result.to_dict()
+    # Generate alerts from analysis
+    analysis_dict = result.to_dict()
+    alert_service.evaluate(analysis_dict)
+    # Broadcast via WebSocket
+    await ws_manager.send_analysis_update(analysis_dict)
+    return analysis_dict
 
 
 # ── Individual Components ──
@@ -105,6 +112,77 @@ async def risk_metrics():
     return analysis.risk
 
 
+# ── New Engine Endpoints ──
+@router.get("/valuation")
+async def valuation():
+    """Valuation engine — fair value, peer comparison, multiples."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.valuation
+
+
+@router.get("/funding")
+async def funding():
+    """Funding analysis — warehouse facilities, capacity, maturity."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.funding
+
+
+@router.get("/origination")
+async def origination():
+    """Origination momentum — volume, growth, product mix."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.origination
+
+
+@router.get("/factor")
+async def factor():
+    """Factor / style exposure analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.factor
+
+
+@router.get("/stress")
+async def stress():
+    """Balance sheet / liquidity stress test."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.stress
+
+
+@router.get("/reflexivity")
+async def reflexivity():
+    """Reflexivity / feedback loop analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.reflexivity
+
+
+@router.get("/execution")
+async def execution():
+    """Execution / microstructure / liquidity."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.execution
+
+
+@router.get("/catalyst")
+async def catalyst():
+    """Catalyst / event analytics."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.catalyst
+
+
+@router.get("/probability")
+async def probability():
+    """Probability estimates and cones."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.probability
+
+
+@router.get("/overfitting")
+async def overfitting():
+    """Overfitting / false edge detection."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.overfitting
+
+
 # ── Scenario Lab ──
 class ScenarioRequest(BaseModel):
     spy_return_pct: float = 0.0
@@ -130,6 +208,21 @@ class ScenarioRequest(BaseModel):
 async def run_scenario(req: ScenarioRequest):
     """Interactive scenario lab — adjust levers and get recalculated outputs."""
     return await orchestrator.run_scenario(req.model_dump())
+
+
+# ── Backtest ──
+class BacktestRequest(BaseModel):
+    strategy: str = "technical_signals"
+    days: int = 365
+    position_size_pct: float = 10.0
+    stop_loss_pct: float = 5.0
+    take_profit_pct: float = 10.0
+
+
+@router.post("/backtest")
+async def run_backtest(req: BacktestRequest):
+    """Run a backtest with given parameters."""
+    return await orchestrator.run_backtest(req.model_dump())
 
 
 # ── Simulation Bots ──
@@ -179,19 +272,81 @@ async def news(ticker: str = "UPST", limit: int = 20):
 
 # ── Alerts ──
 @router.get("/alerts")
-async def alerts():
+async def alerts(severity: str | None = None, limit: int = 50):
     """Get recent system alerts."""
-    # TODO: Wire to persistent alert storage
-    return {"alerts": [], "count": 0}
+    return {"alerts": alert_service.get_alerts(severity, limit)}
 
 
-# ── Data Quality ──
+@router.post("/alerts/{alert_id}/acknowledge")
+async def acknowledge_alert(alert_id: str):
+    """Acknowledge an alert."""
+    success = alert_service.acknowledge(alert_id)
+    return {"success": success}
+
+
+# ── Data Quality / Governance ──
 @router.get("/data-quality")
 async def data_quality():
     """Data governance / quality dashboard."""
     analysis = await orchestrator.run_full_analysis()
-    return {
-        "sources": analysis.data_sources,
-        "warnings": analysis.warnings,
-        "freshness": {k: "live" for k in analysis.data_sources},
-    }
+    return analysis.data_governance
+
+
+# ── Export ──
+@router.get("/export/csv")
+async def export_csv():
+    """Export analysis as CSV."""
+    analysis = await orchestrator.run_full_analysis()
+    csv_data = export_service.to_csv(analysis.to_dict())
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=upst_analysis.csv"},
+    )
+
+
+@router.get("/export/json")
+async def export_json():
+    """Export analysis as formatted JSON."""
+    analysis = await orchestrator.run_full_analysis()
+    json_data = export_service.to_json(analysis.to_dict())
+    return Response(
+        content=json_data,
+        media_type="application/json",
+        headers={"Content-Disposition": "attachment; filename=upst_analysis.json"},
+    )
+
+
+@router.get("/export/summary")
+async def export_summary():
+    """Export daily summary as text."""
+    analysis = await orchestrator.run_full_analysis()
+    summary = export_service.to_summary_text(analysis.to_dict())
+    return Response(
+        content=summary,
+        media_type="text/plain",
+        headers={"Content-Disposition": "attachment; filename=upst_daily_summary.txt"},
+    )
+
+
+# ── WebSocket ──
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time updates."""
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Client can send commands like "subscribe" or "ping"
+            if data == "ping":
+                await websocket.send_text('{"event":"pong"}')
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+
+
+# ── Scheduler Status ──
+@router.get("/scheduler/status")
+async def scheduler_status():
+    """Get scheduler status."""
+    from backend.services.scheduler import scheduler_service
+    return scheduler_service.status()

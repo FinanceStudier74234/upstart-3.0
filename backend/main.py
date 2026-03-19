@@ -53,6 +53,23 @@ def create_app() -> FastAPI:
         logger.info("Mock mode: %s", settings.mock_mode)
         logger.info("API docs at http://%s:%s/docs", settings.app_host, settings.app_port)
 
+        # Initialize database (graceful fallback)
+        from backend.services.database import init_db
+        await init_db()
+
+        # Start scheduler
+        from backend.services.scheduler import scheduler_service
+        from backend.services.orchestrator import orchestrator
+        await scheduler_service.start(orchestrator)
+
+    @app.on_event("shutdown")
+    async def shutdown():
+        logger.info("Shutting down...")
+        from backend.services.scheduler import scheduler_service
+        await scheduler_service.stop()
+        from backend.services.database import close_db
+        await close_db()
+
     return app
 
 

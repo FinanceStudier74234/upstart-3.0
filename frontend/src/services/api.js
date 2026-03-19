@@ -16,6 +16,12 @@ async function postJson(url, body) {
   return res.json()
 }
 
+async function fetchBlob(url) {
+  const res = await fetch(BASE + url)
+  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  return res.blob()
+}
+
 export const api = {
   health: () => fetchJson('/health'),
   fullAnalysis: () => fetchJson('/analysis'),
@@ -29,11 +35,27 @@ export const api = {
   tradeDecision: () => fetchJson('/trade-decision'),
   forecast: () => fetchJson('/forecast'),
   risk: () => fetchJson('/risk'),
+  valuation: () => fetchJson('/valuation'),
+  funding: () => fetchJson('/funding'),
+  origination: () => fetchJson('/origination'),
+  factor: () => fetchJson('/factor'),
+  stress: () => fetchJson('/stress'),
+  reflexivity: () => fetchJson('/reflexivity'),
+  execution: () => fetchJson('/execution'),
+  catalyst: () => fetchJson('/catalyst'),
+  probability: () => fetchJson('/probability'),
+  overfitting: () => fetchJson('/overfitting'),
   macro: (indicator) => fetchJson(`/macro/${indicator}`),
   news: (limit = 20) => fetchJson(`/news?limit=${limit}`),
-  alerts: () => fetchJson('/alerts'),
+  alerts: (severity) => fetchJson(`/alerts${severity ? `?severity=${severity}` : ''}`),
+  acknowledgeAlert: (id) => postJson(`/alerts/${id}/acknowledge`, {}),
   dataQuality: () => fetchJson('/data-quality'),
   bots: () => fetchJson('/bots'),
   runBot: (botName, params = {}) => postJson('/bot', { bot_name: botName, params }),
   runScenario: (params) => postJson('/scenario', params),
+  runBacktest: (params) => postJson('/backtest', params),
+  exportCsv: () => fetchBlob('/export/csv'),
+  exportJson: () => fetchBlob('/export/json'),
+  exportSummary: () => fetchBlob('/export/summary'),
+  schedulerStatus: () => fetchJson('/scheduler/status'),
 }

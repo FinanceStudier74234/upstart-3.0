@@ -10,6 +10,7 @@ import logging
 from dataclasses import dataclass, field, asdict
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from backend.adapters.provider import data_provider
@@ -22,6 +23,19 @@ from backend.engines.trade_decision import TradeDecisionEngine
 from backend.engines.forecast import ForecastEngine
 from backend.engines.risk import RiskEngine
 from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+from backend.engines.valuation import ValuationEngine
+from backend.engines.funding_analysis import FundingAnalysisEngine
+from backend.engines.origination_analysis import OriginationAnalysisEngine
+from backend.engines.factor import FactorEngine
+from backend.engines.stress import StressEngine
+from backend.engines.reflexivity import ReflexivityEngine
+from backend.engines.execution import ExecutionEngine
+from backend.engines.data_governance import DataGovernanceEngine
+from backend.engines.catalyst import CatalystEngine
+from backend.engines.overfitting import OverfittingEngine
+from backend.engines.probability import ProbabilityEngine
+from backend.engines.macro import MacroEngine
+from backend.engines.backtest import BacktestEngine
 from backend.bots.price_action_bot import PriceActionBot
 from backend.bots.squeeze_bot import SqueezeBot
 from backend.bots.macro_shock_bot import MacroShockBot
@@ -52,6 +66,20 @@ class FullAnalysis:
     forecast: dict = field(default_factory=dict)
     risk: dict = field(default_factory=dict)
 
+    # New engine outputs
+    valuation: dict = field(default_factory=dict)
+    funding: dict = field(default_factory=dict)
+    origination: dict = field(default_factory=dict)
+    macro: dict = field(default_factory=dict)
+    factor: dict = field(default_factory=dict)
+    stress: dict = field(default_factory=dict)
+    reflexivity: dict = field(default_factory=dict)
+    execution: dict = field(default_factory=dict)
+    data_governance: dict = field(default_factory=dict)
+    catalyst: dict = field(default_factory=dict)
+    overfitting: dict = field(default_factory=dict)
+    probability: dict = field(default_factory=dict)
+
     # Data quality
     data_sources: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -73,6 +101,19 @@ class Orchestrator:
         self.forecast_engine = ForecastEngine()
         self.risk_engine = RiskEngine()
         self.scenario_engine = ScenarioEngine()
+        self.valuation_engine = ValuationEngine()
+        self.funding_engine = FundingAnalysisEngine()
+        self.origination_engine = OriginationAnalysisEngine()
+        self.factor_engine = FactorEngine()
+        self.stress_engine = StressEngine()
+        self.reflexivity_engine = ReflexivityEngine()
+        self.execution_engine = ExecutionEngine()
+        self.data_governance_engine = DataGovernanceEngine()
+        self.catalyst_engine = CatalystEngine()
+        self.overfitting_engine = OverfittingEngine()
+        self.probability_engine = ProbabilityEngine()
+        self.macro_engine = MacroEngine()
+        self.backtest_engine = BacktestEngine()
 
         # Bots
         self.bots = {
@@ -141,21 +182,76 @@ class Orchestrator:
         analysis.short = self._snapshot_to_dict(short_snap)
 
         # ── 5. SPY/Beta Relationship ──
+        upst_returns = None
+        spy_returns = None
         if not upst_df.empty and not spy_df.empty:
             spy_rel = self.spy_beta_engine.analyze(upst_df, spy_df)
             analysis.spy_relationship = self._snapshot_to_dict(spy_rel)
+            upst_returns = upst_df["close"].pct_change().dropna().values
+            spy_returns = spy_df["close"].pct_change().dropna().values
 
-        # ── 6. Scores ──
+        # ── 6. New Engines ──
+        # Valuation
+        val_snap = self.valuation_engine.analyze(price=analysis.price)
+        analysis.valuation = self._snapshot_to_dict(val_snap)
+
+        # Funding
+        fund_snap = self.funding_engine.analyze()
+        analysis.funding = self._snapshot_to_dict(fund_snap)
+
+        # Origination
+        orig_snap = self.origination_engine.analyze()
+        analysis.origination = self._snapshot_to_dict(orig_snap)
+
+        # Macro
+        macro_snap = self.macro_engine.analyze({})
+        analysis.macro = self._snapshot_to_dict(macro_snap)
+
+        # Factor
+        factor_snap = self.factor_engine.analyze(upst_returns, spy_returns)
+        analysis.factor = self._snapshot_to_dict(factor_snap)
+
+        # Stress
+        stress_snap = self.stress_engine.analyze()
+        analysis.stress = self._snapshot_to_dict(stress_snap)
+
+        # Reflexivity
+        reflex_snap = self.reflexivity_engine.analyze(
+            upst_returns, analysis.short, analysis.options, analysis.price)
+        analysis.reflexivity = self._snapshot_to_dict(reflex_snap)
+
+        # Execution
+        exec_snap = self.execution_engine.analyze(price=analysis.price)
+        analysis.execution = self._snapshot_to_dict(exec_snap)
+
+        # Data Governance
+        dg_snap = self.data_governance_engine.analyze()
+        analysis.data_governance = self._snapshot_to_dict(dg_snap)
+
+        # Catalyst
+        cat_snap = self.catalyst_engine.analyze()
+        analysis.catalyst = self._snapshot_to_dict(cat_snap)
+
+        # Overfitting
+        of_snap = self.overfitting_engine.analyze()
+        analysis.overfitting = self._snapshot_to_dict(of_snap)
+
+        # ── 7. Scores (now with all engine data) ──
         scores = self.scoring_engine.compute_all(
             technical=analysis.technical,
             options=analysis.options,
             short=analysis.short,
+            funding=analysis.funding,
+            origination=analysis.origination,
+            macro=analysis.macro,
+            valuation=analysis.valuation,
             spy_rel=analysis.spy_relationship,
+            forecast=analysis.forecast,
         )
         analysis.scores = {k: {"value": v.value, "components": v.components, "explanation": v.explanation}
                            for k, v in scores.items()}
 
-        # ── 7. Trade Decision ──
+        # ── 8. Trade Decision ──
         decision = self.trade_decision_engine.decide(
             scores, analysis.technical, analysis.options,
             analysis.short, analysis.spy_relationship,
@@ -163,7 +259,7 @@ class Orchestrator:
         )
         analysis.trade_decision = self._snapshot_to_dict(decision)
 
-        # ── 8. Forecast ──
+        # ── 9. Forecast ──
         if not upst_df.empty:
             beta = analysis.spy_relationship.get("beta", 1.5) or 1.5
             ensemble = self.forecast_engine.forecast(upst_df, "UPST", spy_beta=beta)
@@ -180,12 +276,21 @@ class Orchestrator:
                 ],
             }
 
-        # ── 9. Risk ──
+        # ── 10. Risk ──
         if not upst_df.empty:
-            import numpy as np
             returns = upst_df["close"].pct_change().dropna().values
             risk = self.risk_engine.compute_risk(returns, analysis.price)
             analysis.risk = self._snapshot_to_dict(risk)
+
+        # ── 11. Probability ──
+        if upst_returns is not None:
+            target = analysis.trade_decision.get("target_price")
+            stop = analysis.trade_decision.get("stop_price")
+            prob_snap = self.probability_engine.analyze(
+                upst_returns, analysis.price, target, stop,
+                short_data=analysis.short,
+            )
+            analysis.probability = self._snapshot_to_dict(prob_snap)
 
         analysis.warnings = warnings
         return analysis
@@ -225,6 +330,55 @@ class Orchestrator:
 
         result = self.scenario_engine.run_scenario(inputs, price, base_scores, beta, base_iv)
         return self._snapshot_to_dict(result)
+
+    async def run_backtest(self, params: dict) -> dict:
+        """Run a backtest with given parameters."""
+        end = dt.date.today()
+        start = end - dt.timedelta(days=params.get("days", 365))
+        upst_bars = await data_provider.get_bars("UPST", "1d", start, end)
+        spy_bars = await data_provider.get_bars("SPY", "1d", start, end)
+
+        upst_df = self._bars_to_df(upst_bars.data)
+        spy_df = self._bars_to_df(spy_bars.data)
+
+        if upst_df.empty:
+            return {"error": "No price data available for backtest"}
+
+        # Generate simple signals from technical analysis
+        signals = self._generate_backtest_signals(upst_df, params)
+
+        result = self.backtest_engine.run(
+            upst_df, signals,
+            strategy_name=params.get("strategy", "technical_signals"),
+            position_size_pct=params.get("position_size_pct", 10),
+            stop_loss_pct=params.get("stop_loss_pct", 5),
+            take_profit_pct=params.get("take_profit_pct", 10),
+            spy_df=spy_df if not spy_df.empty else None,
+        )
+        return self._snapshot_to_dict(result)
+
+    def _generate_backtest_signals(self, df: pd.DataFrame, params: dict) -> list[dict]:
+        """Generate trading signals for backtesting."""
+        signals = []
+        close = df["close"].astype(float)
+
+        # Simple RSI-based signals
+        delta = close.diff()
+        gain = delta.clip(lower=0).rolling(14).mean()
+        loss = (-delta.clip(upper=0)).rolling(14).mean()
+        rs = gain / loss.replace(0, np.nan)
+        rsi = 100 - (100 / (1 + rs))
+
+        for i in range(14, len(close)):
+            rsi_val = rsi.iloc[i]
+            if pd.notna(rsi_val):
+                date_str = str(df.index[i].date()) if hasattr(df.index[i], 'date') else str(df.index[i])
+                if rsi_val < 30:
+                    signals.append({"date": date_str, "direction": "long", "strength": 0.8})
+                elif rsi_val > 70:
+                    signals.append({"date": date_str, "direction": "short", "strength": 0.8})
+
+        return signals
 
     def _bars_to_df(self, bars: list | None) -> pd.DataFrame:
         if not bars:
