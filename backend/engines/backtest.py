@@ -1,0 +1,249 @@
+"""
+Backtesting / Validation / Performance Attribution Engine — Phase 7
+Walk-forward testing, signal backtests, regime-specific analysis.
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+from dataclasses import dataclass, field
+
+import numpy as np
+import pandas as pd
+from scipy import stats
+
+
+@dataclass
+class BacktestResult:
+    """Full backtest output with performance metrics and attribution."""
+    strategy_name: str
+    ticker: str = "UPST"
+    start_date: dt.date | None = None
+    end_date: dt.date | None = None
+
+    # Performance
+    total_return: float = 0.0
+    annualized_return: float = 0.0
+    sharpe_ratio: float = 0.0
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    max_drawdown: float = 0.0
+
+    # Trade stats
+    total_trades: int = 0
+    win_rate: float = 0.0
+    avg_win: float = 0.0
+    avg_loss: float = 0.0
+    payoff_ratio: float = 0.0
+    expectancy: float = 0.0
+    profit_factor: float = 0.0
+
+    # Beta decomposition
+    alpha_vs_spy: float = 0.0
+    beta_vs_spy: float = 0.0
+
+    # Trades
+    trades: list[dict] = field(default_factory=list)
+
+    # Regime breakdown
+    performance_by_regime: dict = field(default_factory=dict)
+
+    # Equity curve
+    equity_curve: list[float] = field(default_factory=list)
+    drawdown_series: list[float] = field(default_factory=list)
+
+
+class BacktestEngine:
+    """Backtests trading signals against historical price data."""
+
+    def run(
+        self,
+        df: pd.DataFrame,
+        signals: list[dict],
+        strategy_name: str = "default",
+        initial_capital: float = 100_000.0,
+        position_size_pct: float = 10.0,
+        stop_loss_pct: float = 5.0,
+        take_profit_pct: float = 10.0,
+        spy_df: pd.DataFrame | None = None,
+    ) -> BacktestResult:
+        """
+        df: OHLCV DataFrame indexed by datetime
+        signals: list of {"date": str, "direction": "long"|"short", "strength": float}
+        """
+        result = BacktestResult(strategy_name=strategy_name)
+
+        if df.empty or not signals:
+            return result
+
+        close = df["close"].astype(float)
+        result.start_date = df.index[0].date() if hasattr(df.index[0], 'date') else df.index[0]
+        result.end_date = df.index[-1].date() if hasattr(df.index[-1], 'date') else df.index[-1]
+
+        capital = initial_capital
+        equity = [capital]
+        trades = []
+        position = None  # {"entry_price", "direction", "entry_date", "size"}
+
+        for i in range(1, len(close)):
+            date = df.index[i]
+            price = float(close.iloc[i])
+
+            # Check exits
+            if position is not None:
+                pnl_pct = (price - position["entry_price"]) / position["entry_price"]
+                if position["direction"] == "short":
+                    pnl_pct = -pnl_pct
+
+                if pnl_pct <= -stop_loss_pct / 100:
+                    # Stop loss hit
+                    pnl = position["size"] * pnl_pct
+                    capital += position["size"] + pnl
+                    trades.append({
+                        "entry_date": position["entry_date"],
+                        "exit_date": date,
+                        "direction": position["direction"],
+                        "entry_price": position["entry_price"],
+                        "exit_price": price,
+                        "pnl": round(pnl, 2),
+                        "pnl_pct": round(pnl_pct * 100, 2),
+                        "exit_reason": "stop",
+                    })
+                    position = None
+                elif pnl_pct >= take_profit_pct / 100:
+                    pnl = position["size"] * pnl_pct
+                    capital += position["size"] + pnl
+                    trades.append({
+                        "entry_date": position["entry_date"],
+                        "exit_date": date,
+                        "direction": position["direction"],
+                        "entry_price": position["entry_price"],
+                        "exit_price": price,
+                        "pnl": round(pnl, 2),
+                        "pnl_pct": round(pnl_pct * 100, 2),
+                        "exit_reason": "target",
+                    })
+                    position = None
+
+            # Check entries
+            if position is None:
+                date_str = str(date.date()) if hasattr(date, 'date') else str(date)
+                matching = [s for s in signals if s.get("date") == date_str]
+                if matching:
+                    sig = matching[0]
+                    size = capital * position_size_pct / 100
+                    position = {
+                        "entry_price": price,
+                        "direction": sig["direction"],
+                        "entry_date": date,
+                        "size": size,
+                    }
+                    capital -= size
+
+            # Track equity
+            if position:
+                mark_pnl = (price - position["entry_price"]) / position["entry_price"]
+                if position["direction"] == "short":
+                    mark_pnl = -mark_pnl
+                equity.append(capital + position["size"] * (1 + mark_pnl))
+            else:
+                equity.append(capital)
+
+        # Close any open position
+        if position and len(close) > 0:
+            final_price = float(close.iloc[-1])
+            pnl_pct = (final_price - position["entry_price"]) / position["entry_price"]
+            if position["direction"] == "short":
+                pnl_pct = -pnl_pct
+            pnl = position["size"] * pnl_pct
+            trades.append({
+                "entry_date": position["entry_date"],
+                "exit_date": df.index[-1],
+                "direction": position["direction"],
+                "entry_price": position["entry_price"],
+                "exit_price": final_price,
+                "pnl": round(pnl, 2),
+                "pnl_pct": round(pnl_pct * 100, 2),
+                "exit_reason": "end_of_period",
+            })
+
+        # ── Compute Metrics ──
+        result.trades = trades
+        result.total_trades = len(trades)
+        result.equity_curve = [round(e, 2) for e in equity]
+
+        if not trades:
+            return result
+
+        pnls = [t["pnl_pct"] for t in trades]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p <= 0]
+
+        result.total_return = round((equity[-1] / initial_capital - 1) * 100, 2)
+        days = (result.end_date - result.start_date).days if result.start_date and result.end_date else 365
+        result.annualized_return = round(result.total_return * 365 / max(days, 1), 2)
+
+        result.win_rate = round(len(wins) / len(trades) * 100, 2) if trades else 0
+        result.avg_win = round(np.mean(wins), 2) if wins else 0
+        result.avg_loss = round(np.mean(losses), 2) if losses else 0
+        result.payoff_ratio = round(abs(result.avg_win / result.avg_loss), 2) if result.avg_loss != 0 else 0
+        result.expectancy = round(np.mean(pnls), 2) if pnls else 0
+        result.profit_factor = round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 0
+
+        # Sharpe / Sortino
+        equity_returns = pd.Series(equity).pct_change().dropna()
+        if len(equity_returns) > 1 and equity_returns.std() > 0:
+            result.sharpe_ratio = round(
+                float(equity_returns.mean() / equity_returns.std() * np.sqrt(252)), 2,
+            )
+            downside = equity_returns[equity_returns < 0]
+            if len(downside) > 0 and downside.std() > 0:
+                result.sortino_ratio = round(
+                    float(equity_returns.mean() / downside.std() * np.sqrt(252)), 2,
+                )
+
+        # Max drawdown
+        equity_series = pd.Series(equity)
+        cummax = equity_series.cummax()
+        dd = (equity_series / cummax - 1) * 100
+        result.max_drawdown = round(float(dd.min()), 2)
+        result.drawdown_series = [round(float(d), 2) for d in dd]
+
+        if result.max_drawdown != 0:
+            result.calmar_ratio = round(result.annualized_return / abs(result.max_drawdown), 2)
+
+        # Alpha / Beta vs SPY
+        if spy_df is not None and not spy_df.empty:
+            spy_close = spy_df["close"].astype(float)
+            spy_ret = spy_close.pct_change().dropna()
+            min_len = min(len(equity_returns), len(spy_ret))
+            if min_len > 10:
+                slope, intercept, _, _, _ = stats.linregress(
+                    spy_ret.tail(min_len).values, equity_returns.tail(min_len).values,
+                )
+                result.beta_vs_spy = round(slope, 4)
+                result.alpha_vs_spy = round(intercept * 252, 4)
+
+        return result
+
+    def walk_forward(
+        self,
+        df: pd.DataFrame,
+        signal_generator,
+        train_window: int = 252,
+        test_window: int = 63,
+        **kwargs,
+    ) -> list[BacktestResult]:
+        """Walk-forward backtesting with rolling train/test splits."""
+        results = []
+        total_bars = len(df)
+
+        for start in range(0, total_bars - train_window - test_window, test_window):
+            train_df = df.iloc[start:start + train_window]
+            test_df = df.iloc[start + train_window:start + train_window + test_window]
+
+            signals = signal_generator(train_df)
+            result = self.run(test_df, signals, **kwargs)
+            results.append(result)
+
+        return results

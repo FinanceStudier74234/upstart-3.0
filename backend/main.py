@@ -1,0 +1,69 @@
+"""
+UPST Master Quant Finance Hub — FastAPI Application
+"""
+
+from __future__ import annotations
+
+import logging
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
+from backend.api.routes import router
+from backend.config.settings import settings
+
+logging.basicConfig(
+    level=getattr(logging, settings.log_level.upper(), logging.INFO),
+    format="%(asctime)s | %(levelname)-7s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("upst_hub")
+
+
+def create_app() -> FastAPI:
+    app = FastAPI(
+        title="UPST Quant Finance Hub",
+        description="Institutional-grade quantitative finance platform for Upstart Holdings (UPST)",
+        version="3.0.0",
+        docs_url="/docs",
+        redoc_url="/redoc",
+    )
+
+    # CORS
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if settings.app_debug else ["http://localhost:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # API routes
+    app.include_router(router)
+
+    # Serve frontend static files (after build)
+    import os
+    frontend_dist = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
+    if os.path.isdir(frontend_dist):
+        app.mount("/", StaticFiles(directory=frontend_dist, html=True), name="frontend")
+
+    @app.on_event("startup")
+    async def startup():
+        logger.info("UPST Quant Finance Hub v3.0 starting...")
+        logger.info("Mock mode: %s", settings.mock_mode)
+        logger.info("API docs at http://%s:%s/docs", settings.app_host, settings.app_port)
+
+    return app
+
+
+app = create_app()
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        "backend.main:app",
+        host=settings.app_host,
+        port=settings.app_port,
+        reload=settings.app_debug,
+    )
