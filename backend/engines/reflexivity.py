@@ -73,11 +73,15 @@ class ReflexivityEngine:
             if len(sq_ret) > 1:
                 snap.volatility_clustering = round(float(np.corrcoef(sq_ret[:-1], sq_ret[1:])[0, 1]), 4)
 
-            # Jump frequency (moves > 3 sigma)
+            # Jump frequency: large moves (> 3 sigma) per trading month.
+            # Assumes daily return data; 21 trading days per month.
+            trading_days_per_month = 21
             std = np.std(returns)
             if std > 0:
-                jumps = np.sum(np.abs(returns) > 3 * std)
-                snap.jump_frequency = round(jumps / len(returns) * 21, 2)  # per month
+                jumps = int(np.sum(np.abs(returns) > 3 * std))
+                snap.jump_frequency = round(
+                    jumps / len(returns) * trading_days_per_month, 2
+                )
 
             # Tail thickness
             from scipy import stats as sp_stats
@@ -124,14 +128,25 @@ class ReflexivityEngine:
             strength=max(0, min(100, (70 - price) * 2)) if price > 0 else 0,
         ))
 
-        # AI narrative loop
+        # AI narrative loop — strength scales with price momentum
+        # (higher price implies AI narrative is driving multiple expansion)
+        ai_strength = 40  # base: AI narrative always present for UPST
+        if price > 80:
+            ai_strength = min(100, 50 + (price - 80) * 0.5)
+            ai_state = "active"
+        elif price > 50:
+            ai_strength = 40 + (price - 50) * 0.3
+            ai_state = "activating"
+        else:
+            ai_strength = max(10, 40 - (50 - price) * 0.5)
+            ai_state = "dormant"
         loops.append(FeedbackLoop(
             name="AI Narrative Momentum",
             type="positive",
             trigger="AI sector sentiment shift",
             mechanism="AI hype → multiple expansion → price rise → more AI coverage → more hype",
-            current_state="active",
-            strength=65,
+            current_state=ai_state,
+            strength=round(ai_strength, 1),
         ))
 
         # Options gamma loop

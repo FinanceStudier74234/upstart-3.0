@@ -151,10 +151,10 @@ class TechnicalEngine:
             gap_pct = (today_open - prev_close) / prev_close * 100
             if gap_pct > 1.0:
                 snap.gap_up = True
-                snap.gap_fill_probability = 0.65
+                snap.gap_fill_probability = self._empirical_gap_fill_prob(df, direction="up")
             elif gap_pct < -1.0:
                 snap.gap_down = True
-                snap.gap_fill_probability = 0.70
+                snap.gap_fill_probability = self._empirical_gap_fill_prob(df, direction="down")
 
         # ── Zones ──
         snap.buy_zones = self._compute_buy_zones(snap)
@@ -257,6 +257,47 @@ class TechnicalEngine:
         supports = sorted(set(supports), reverse=True)[:5]
         resistances = sorted(set(resistances))[:5]
         return supports, resistances
+
+    def _empirical_gap_fill_prob(
+        self, df: pd.DataFrame, direction: str, lookback: int = 252,
+    ) -> float:
+        """
+        Estimate gap fill probability from historical data.
+        A gap is 'filled' if the close returns to the prior day's close
+        within the same session (for gap ups: low <= prev close,
+        for gap downs: high >= prev close).
+        Falls back to 0.65 (up) / 0.70 (down) if insufficient data.
+        """
+        close = df["close"].astype(float)
+        opens = df["open"].astype(float)
+        highs = df["high"].astype(float)
+        lows = df["low"].astype(float)
+
+        window = min(lookback, len(df) - 1)
+        if window < 30:
+            return 0.65 if direction == "up" else 0.70
+
+        gaps_found = 0
+        gaps_filled = 0
+
+        for i in range(-window, -1):
+            prev_c = float(close.iloc[i - 1])
+            open_i = float(opens.iloc[i])
+            gap_pct = (open_i - prev_c) / prev_c * 100
+
+            if direction == "up" and gap_pct > 1.0:
+                gaps_found += 1
+                if float(lows.iloc[i]) <= prev_c:
+                    gaps_filled += 1
+            elif direction == "down" and gap_pct < -1.0:
+                gaps_found += 1
+                if float(highs.iloc[i]) >= prev_c:
+                    gaps_filled += 1
+
+        if gaps_found < 5:
+            return 0.65 if direction == "up" else 0.70
+
+        return round(gaps_filled / gaps_found, 2)
 
     def _vol_regime(self, close: pd.Series) -> str:
         if len(close) < 63:

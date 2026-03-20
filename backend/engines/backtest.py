@@ -234,7 +234,16 @@ class BacktestEngine:
         test_window: int = 63,
         **kwargs,
     ) -> list[BacktestResult]:
-        """Walk-forward backtesting with rolling train/test splits."""
+        """Walk-forward backtesting with rolling train/test splits.
+
+        signal_generator: callable(train_df) -> list[dict] where each dict has
+            at minimum {"date": str, "direction": "long"|"short", "strength": float}
+        """
+        if not callable(signal_generator):
+            raise TypeError(
+                f"signal_generator must be callable, got {type(signal_generator).__name__}"
+            )
+
         results = []
         total_bars = len(df)
 
@@ -243,7 +252,17 @@ class BacktestEngine:
             test_df = df.iloc[start + train_window:start + train_window + test_window]
 
             signals = signal_generator(train_df)
-            result = self.run(test_df, signals, **kwargs)
+
+            # Validate signal format
+            if not isinstance(signals, list):
+                signals = list(signals) if signals else []
+            valid_signals = []
+            for sig in signals:
+                if isinstance(sig, dict) and "date" in sig and "direction" in sig:
+                    if sig["direction"] in ("long", "short"):
+                        valid_signals.append(sig)
+
+            result = self.run(test_df, valid_signals, **kwargs)
             results.append(result)
 
         return results

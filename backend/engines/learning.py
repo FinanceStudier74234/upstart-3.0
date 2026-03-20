@@ -72,7 +72,10 @@ class LearningEngine:
             if pred.prediction_id == pred_id and not pred.validated:
                 pred.actual_value = actual_value
                 pred.error = actual_value - pred.predicted_value
-                pred.direction_correct = (pred.error >= 0) == (pred.predicted_value >= 0)
+                # Direction correct: did actual and predicted agree on sign?
+                # Both represent returns or directional forecasts, so check
+                # if actual moved in the same direction the model predicted.
+                pred.direction_correct = (actual_value >= 0) == (pred.predicted_value >= 0)
                 pred.validated = True
                 self._update_model_performance(pred.model_name)
                 return True

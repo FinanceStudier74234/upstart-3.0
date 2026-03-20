@@ -301,7 +301,8 @@ class ScoringEngine:
         agreement = max(bullish, bearish) / total if total > 0 else 0.5
         avg_confidence = sum(s.confidence for s in scores.values()) / len(scores) if scores else 0.5
 
-        score = agreement * 40 * 100 / 100 + avg_confidence * 30 * 100 + 30  # Base
+        # agreement (0-1) contributes up to 40 pts, confidence (0-1) up to 30 pts, base 30
+        score = agreement * 40 + avg_confidence * 30 + 30
         return ScoreResult(
             name="trade_quality",
             value=round(max(0, min(100, score)), 2),

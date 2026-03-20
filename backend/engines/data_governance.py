@@ -6,7 +6,10 @@ source reliability, coverage gaps, and research quality metrics.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -87,16 +90,33 @@ class DataGovernanceEngine:
                     elif age_minutes < max_age * 3:
                         src.freshness = "stale"
                         snap.stale_sources.append(src.name)
+                        logger.warning(
+                            "Data source '%s' is stale (%.0f min old, max %d min)",
+                            src.name, age_minutes, max_age,
+                        )
                     else:
                         src.freshness = "expired"
                         snap.expired_sources.append(src.name)
+                        logger.error(
+                            "Data source '%s' has EXPIRED (%.0f min old, max %d min)",
+                            src.name, age_minutes, max_age,
+                        )
                 except (ValueError, TypeError):
                     src.freshness = "unknown"
+                    logger.warning(
+                        "Data source '%s' has unparseable last_updated: %r",
+                        src.name, src.last_updated,
+                    )
             else:
                 src.freshness = "unknown"
+                logger.warning("Data source '%s' has no last_updated timestamp", src.name)
 
+            if src.quality_score < 30:
+                src.warnings.append(f"Very low quality: {src.quality_score}")
+                logger.warning("Data source '%s' quality critically low: %.1f", src.name, src.quality_score)
             if src.coverage_pct < 50:
                 src.warnings.append(f"Low coverage: {src.coverage_pct}%")
+                logger.info("Data source '%s' coverage below 50%%: %.1f%%", src.name, src.coverage_pct)
             snap.sources.append(src)
 
         # Aggregate

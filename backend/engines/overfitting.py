@@ -94,6 +94,13 @@ class OverfittingEngine:
         snap.min_track_record_months = self._min_track_record(
             snap.is_sharpe or 0, snap.oos_sharpe or 0)
 
+        # White's Reality Check (bootstrap-based)
+        if backtest_results:
+            snap.whites_p_value = self._whites_reality_check(backtest_results)
+            snap.passes_whites_test = (
+                snap.whites_p_value is not None and snap.whites_p_value < 0.05
+            )
+
         # PBO estimate
         snap.pbo = self._estimate_pbo(snap)
 
@@ -142,6 +149,57 @@ class OverfittingEngine:
             pbo += 0.2
         return round(min(1.0, pbo), 2)
 
+    def _whites_reality_check(
+        self,
+        backtest_results: list[dict],
+        n_bootstrap: int = 1000,
+    ) -> float | None:
+        """
+        White's Reality Check (2000) — tests whether the best strategy's
+        performance is significantly better than a zero-mean benchmark after
+        accounting for data snooping across all tested strategies.
+
+        Each dict in backtest_results should have a 'returns' key with a list
+        of period returns. All return series must be the same length.
+
+        Returns a p-value. Low p-value (< 0.05) = best strategy is significant
+        even after accounting for multiple testing.
+        """
+        # Extract return matrices
+        return_series = []
+        for bt in backtest_results:
+            rets = bt.get("returns")
+            if rets is not None and len(rets) > 0:
+                return_series.append(np.array(rets, dtype=float))
+
+        if len(return_series) < 2:
+            return None
+
+        # Align to shortest series length
+        min_len = min(len(r) for r in return_series)
+        if min_len < 20:
+            return None
+        returns_matrix = np.column_stack([r[:min_len] for r in return_series])
+        n_periods, n_strategies = returns_matrix.shape
+
+        # Observed test statistic: max average return across strategies
+        avg_returns = returns_matrix.mean(axis=0)
+        observed_stat = avg_returns.max()
+
+        # Bootstrap: resample periods with replacement, compute max avg
+        rng = np.random.default_rng(42)
+        bootstrap_stats = np.empty(n_bootstrap)
+        for b in range(n_bootstrap):
+            indices = rng.integers(0, n_periods, size=n_periods)
+            resampled = returns_matrix[indices, :]
+            # Center the resampled returns (null: zero mean)
+            centered = resampled - returns_matrix.mean(axis=0, keepdims=True)
+            bootstrap_stats[b] = centered.mean(axis=0).max()
+
+        # p-value: fraction of bootstrap stats >= observed
+        p_value = float(np.mean(bootstrap_stats >= observed_stat))
+        return round(p_value, 4)
+
     def _generate_warnings(self, snap: OverfittingSnapshot) -> list[str]:
         warnings = []
         if snap.sharpe_decay_pct and snap.sharpe_decay_pct > 40:
@@ -156,6 +214,11 @@ class OverfittingEngine:
             warnings.append(f"Deflated Sharpe only {snap.haircut_sharpe:.2f} after haircut")
         if snap.pbo and snap.pbo > 0.5:
             warnings.append(f"PBO = {snap.pbo:.0%} — high probability of backtest overfitting")
+        if snap.whites_p_value is not None and not snap.passes_whites_test:
+            warnings.append(
+                f"Fails White's Reality Check (p={snap.whites_p_value:.3f}) "
+                f"— best strategy not significant after data snooping adjustment"
+            )
         return warnings
 
     def _risk_level(self, snap: OverfittingSnapshot) -> str:

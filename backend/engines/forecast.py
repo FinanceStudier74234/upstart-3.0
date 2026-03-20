@@ -100,8 +100,19 @@ class ForecastEngine:
         self, close, returns, price, horizon, n_paths, ticker, now,
     ) -> ForecastResult:
         """Geometric Brownian Motion with historical drift and volatility."""
-        mu = float(returns.mean()) * 252
-        sigma = float(returns.std()) * math.sqrt(252)
+        mu_raw = returns.mean()
+        sigma_raw = returns.std()
+        # Guard against NaN from empty/constant return series
+        if np.isnan(mu_raw) or np.isnan(sigma_raw) or sigma_raw <= 0:
+            return ForecastResult(
+                ticker=ticker, forecast_time=now, horizon_days=horizon,
+                model_name="gbm_monte_carlo", point_estimate=price,
+                lower_bound=price * 0.8, upper_bound=price * 1.2,
+                explanation="Insufficient return variance for GBM",
+                confidence_score=10.0,
+            )
+        mu = float(mu_raw) * 252
+        sigma = float(sigma_raw) * math.sqrt(252)
         dt_val = 1 / 252
 
         paths = np.zeros((n_paths, horizon + 1))

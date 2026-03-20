@@ -122,8 +122,9 @@ class RiskEngine:
             rm.max_loss_size_pct = max_portfolio_loss_pct
 
         # 4. Recommended = minimum of approaches
-        candidates = [rm.vol_target_size_pct, rm.quarter_kelly_pct, rm.max_loss_size_pct]
-        rm.recommended_size_pct = round(min(c for c in candidates if c and c > 0), 2)
+        candidates = [c for c in [rm.vol_target_size_pct, rm.quarter_kelly_pct, rm.max_loss_size_pct]
+                       if c is not None and c > 0]
+        rm.recommended_size_pct = round(min(candidates), 2) if candidates else 1.0
 
         # ── Risk of Ruin ──
         rm.risk_of_ruin_pct = self._risk_of_ruin(

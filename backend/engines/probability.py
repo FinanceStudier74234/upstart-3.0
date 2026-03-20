@@ -119,6 +119,8 @@ class ProbabilityEngine:
         return round(float(stats.norm.cdf(z)), 4)
 
     def _prob_above(self, price: float, target: float, mu: float, sigma: float, days: int) -> float:
+        if price <= 0 or target <= 0:
+            return 0.5
         log_return = np.log(target / price)
         drift = mu * days
         vol = sigma * np.sqrt(days)
@@ -128,6 +130,8 @@ class ProbabilityEngine:
         return round(float(1 - stats.norm.cdf(z)), 4)
 
     def _prob_below(self, price: float, stop: float, mu: float, sigma: float, days: int) -> float:
+        if price <= 0 or stop <= 0:
+            return 0.5
         log_return = np.log(stop / price)
         drift = mu * days
         vol = sigma * np.sqrt(days)

@@ -103,6 +103,23 @@ class MacroEngine:
         else:
             snap.macro_stress_regime = "benign"
 
+        # Z-scores for key risk indicators
+        # Use long-run historical norms as reference:
+        #   HY spread: median ~400bp, std ~150bp (ICE BofA US HY OAS, 2000-2025)
+        #   VIX: median ~17.5, std ~7.0 (CBOE VIX, 1990-2025)
+        if snap.hy_spread is not None:
+            hy_median, hy_std = 400.0, 150.0
+            snap.hy_spread_z = round((snap.hy_spread - hy_median) / hy_std, 2)
+        if snap.vix is not None:
+            vix_median, vix_std = 17.5, 7.0
+            snap.vix_z = round((snap.vix - vix_median) / vix_std, 2)
+
+        # Macro pressure score (0-100, higher = more pressure)
+        snap.macro_pressure_score = self._macro_pressure_score(snap)
+
+        # Credit stress score (0-100, higher = more stress)
+        snap.credit_stress_score = self._credit_stress_score(snap)
+
         # UPST impact
         if snap.macro_stress_regime in ("stressed", "crisis"):
             snap.upst_macro_impact = "headwind"
@@ -110,3 +127,36 @@ class MacroEngine:
             snap.upst_macro_impact = "tailwind"
 
         return snap
+
+    def _macro_pressure_score(self, snap: MacroSnapshot) -> float:
+        """Compute macro pressure score (0=benign, 100=crisis)."""
+        score = 50.0
+        # Fed funds contribution
+        if snap.fed_funds is not None:
+            score += min(15, max(-15, (snap.fed_funds - 3.0) * 5))
+        # Yield curve inversion
+        if snap.yield_curve_inverted:
+            score += 10
+        # HY spread via z-score
+        if snap.hy_spread_z is not None:
+            score += min(15, max(-15, snap.hy_spread_z * 8))
+        # VIX via z-score
+        if snap.vix_z is not None:
+            score += min(10, max(-10, snap.vix_z * 5))
+        # Recession probability
+        if snap.recession_prob is not None:
+            score += min(10, max(-5, (snap.recession_prob - 15) * 0.5))
+        return round(max(0, min(100, score)), 2)
+
+    def _credit_stress_score(self, snap: MacroSnapshot) -> float:
+        """Compute credit stress score (0=easy, 100=crisis)."""
+        score = 50.0
+        if snap.hy_spread_z is not None:
+            score += min(20, max(-20, snap.hy_spread_z * 10))
+        if snap.consumer_delinquency is not None:
+            # Delinquency above 3% is elevated
+            score += min(15, max(-10, (snap.consumer_delinquency - 3.0) * 5))
+        if snap.lending_standards is not None:
+            # Positive = tightening
+            score += min(15, max(-10, snap.lending_standards * 3))
+        return round(max(0, min(100, score)), 2)
