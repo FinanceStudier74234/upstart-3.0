@@ -1,4 +1,5 @@
 import React from 'react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, ReferenceLine } from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -7,6 +8,21 @@ export default function PriceActionPanel({ analysis }) {
   if (!analysis) return <div className="text-terminal-muted p-4">Loading...</div>
   const t = analysis.technical || {}
   const price = analysis.price
+
+  // Build MA comparison chart
+  const maData = []
+  if (t.sma && typeof t.sma === 'object') {
+    Object.entries(t.sma).forEach(([period, val]) => {
+      if (val != null) maData.push({ name: `SMA ${period}`, value: val, type: 'SMA',
+        fill: val < price ? '#10b981' : '#ef4444' })
+    })
+  }
+  if (t.ema && typeof t.ema === 'object') {
+    Object.entries(t.ema).forEach(([period, val]) => {
+      if (val != null) maData.push({ name: `EMA ${period}`, value: val, type: 'EMA',
+        fill: val < price ? '#10b98180' : '#ef444480' })
+    })
+  }
 
   return (
     <div className="space-y-4">
@@ -18,6 +34,30 @@ export default function PriceActionPanel({ analysis }) {
         <Panel><Stat label="ADX" value={t.adx?.toFixed(1)} sub={t.trend_strength} /></Panel>
         <Panel><Stat label="Stoch %K" value={t.stochastic_k?.toFixed(1)} /></Panel>
       </div>
+
+      {/* Moving Averages Chart */}
+      {maData.length > 0 && (
+        <Panel title="Moving Averages vs Price">
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={maData} margin={{ top: 10, right: 20, left: 10, bottom: 5 }}>
+              <XAxis dataKey="name" tick={{ fill: '#6b7280', fontSize: 9 }} angle={-20} textAnchor="end" height={40} />
+              <YAxis tick={{ fill: '#6b7280', fontSize: 10 }} domain={['auto', 'auto']}
+                tickFormatter={(v) => `$${v.toFixed(0)}`} />
+              <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1f2937', fontSize: 11 }}
+                formatter={(v) => `$${Number(v).toFixed(2)}`} />
+              {price > 0 && (
+                <ReferenceLine y={price} stroke="#06b6d4" strokeDasharray="3 3"
+                  label={{ value: `Price $${price.toFixed(2)}`, fill: '#06b6d4', fontSize: 10 }} />
+              )}
+              <Bar dataKey="value" name="MA Value">
+                {maData.map((entry, idx) => (
+                  <Cell key={idx} fill={entry.fill} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Moving Averages">

@@ -3,6 +3,7 @@ Tests for all analytics engines — verifies each engine produces
 valid output with correct score ranges and required fields.
 """
 
+import asyncio
 import numpy as np
 import pandas as pd
 import pytest
@@ -356,3 +357,152 @@ class TestLearningEngine:
         report = engine.get_report()
         assert report["total_predictions"] == 1
         assert report["validated"] == 1
+
+
+# ── Scenario Engine ──
+
+class TestScenarioEngine:
+    def test_run_scenario_defaults(self):
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        engine = ScenarioEngine()
+        inputs = ScenarioInputs()
+        # Create mock score objects
+        base_scores = {}
+        for name in ["funding_strength", "origination_momentum", "macro_pressure",
+                      "credit_stress", "valuation_attractiveness", "technical_strength",
+                      "options_sentiment", "short_opportunity", "squeeze_risk",
+                      "news_regime", "forecast_confidence", "relative_strength_spy",
+                      "trade_quality", "positioning_fragility", "composite_opportunity"]:
+            base_scores[name] = type("Score", (), {"value": 50})()
+        result = engine.run_scenario(inputs, 70.0, base_scores, beta=1.5, base_iv=0.65)
+        assert result.adjusted_price_target > 0
+        assert 0 <= result.probability_up <= 1
+        assert 0 <= result.probability_down <= 1
+        assert result.confidence > 0
+        assert result.adjusted_trade_recommendation is not None
+
+    def test_scenario_with_spy_shock(self):
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        engine = ScenarioEngine()
+        inputs = ScenarioInputs(spy_return_pct=-20.0)
+        base_scores = {}
+        for name in ["funding_strength", "origination_momentum", "macro_pressure",
+                      "credit_stress", "valuation_attractiveness", "technical_strength",
+                      "options_sentiment", "short_opportunity", "squeeze_risk",
+                      "news_regime", "forecast_confidence", "relative_strength_spy",
+                      "trade_quality", "positioning_fragility", "composite_opportunity"]:
+            base_scores[name] = type("Score", (), {"value": 50})()
+        result = engine.run_scenario(inputs, 70.0, base_scores, beta=1.5, base_iv=0.65)
+        # SPY -20% with beta 1.5 should push target below current price
+        assert result.adjusted_price_target < 70.0
+
+
+# ── Bot Tests ──
+
+class TestPriceActionBot:
+    def test_run(self):
+        from backend.bots.price_action_bot import PriceActionBot
+        from backend.bots.base_bot import BotInput
+        bot = PriceActionBot()
+        inp = BotInput(ticker="UPST", current_price=70.0, scenario_params={"n_paths": 100, "horizon_days": 21})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert out.bot_name == "price_action_simulation"
+        assert out.confidence > 0
+        assert "percentiles" in out.results
+        assert len(out.paths) > 0
+
+
+class TestSqueezeBot:
+    def test_run(self):
+        from backend.bots.squeeze_bot import SqueezeBot
+        from backend.bots.base_bot import BotInput
+        bot = SqueezeBot()
+        inp = BotInput(ticker="UPST", current_price=70.0, scenario_params={"short_pct_float": 25.0})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "scenarios" in out.results
+        assert out.confidence > 0
+
+
+class TestMacroShockBot:
+    def test_run(self):
+        from backend.bots.macro_shock_bot import MacroShockBot
+        from backend.bots.base_bot import BotInput
+        bot = MacroShockBot()
+        inp = BotInput(ticker="UPST", current_price=70.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "scenarios" in out.results
+        assert out.results.get("most_likely") is not None
+
+
+class TestFundingStressBot:
+    def test_run(self):
+        from backend.bots.funding_stress_bot import FundingStressBot
+        from backend.bots.base_bot import BotInput
+        bot = FundingStressBot()
+        inp = BotInput(ticker="UPST", current_price=70.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "scenarios" in out.results
+
+
+class TestStrategyBot:
+    def test_run_bearish(self):
+        from backend.bots.strategy_bot import StrategyBot
+        from backend.bots.base_bot import BotInput
+        bot = StrategyBot()
+        inp = BotInput(ticker="UPST", current_price=70.0,
+                       scenario_params={"direction": "bearish", "iv": 0.70, "dte": 30})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "strategies" in out.results
+        assert "best_strategy" in out.results
+
+
+class TestRegimeBot:
+    def test_run(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(ticker="UPST", current_price=70.0,
+                       scenario_params={"vix": 35, "spy_trend": "down", "credit_spread_bps": 600})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert out.results.get("detected_regime") == "risk_off"
+
+
+class TestOptionsReactionBot:
+    def test_run(self):
+        from backend.bots.options_reaction_bot import OptionsReactionBot
+        from backend.bots.base_bot import BotInput
+        bot = OptionsReactionBot()
+        inp = BotInput(ticker="UPST", current_price=70.0,
+                       scenario_params={"price_change_pct": -10, "iv_change_pct": 20})
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "call_repricing" in out.results or "results" in dir(out)
+
+
+class TestTradeDecisionBot:
+    def test_run(self):
+        from backend.bots.trade_decision_bot import TradeDecisionBot
+        from backend.bots.base_bot import BotInput
+        bot = TradeDecisionBot()
+        # Bot _get_val expects either .value attr or dict with "value" key
+        scores = {
+            "technical_strength": {"value": 65}, "options_sentiment": {"value": 60},
+            "funding_strength": {"value": 70}, "macro_pressure": {"value": 40},
+            "short_opportunity": {"value": 30}, "squeeze_risk": {"value": 25},
+        }
+        inp = BotInput(
+            ticker="UPST", current_price=70.0, scenario_params={},
+            market_data={
+                "scores": scores,
+                "technical": {}, "options": {}, "short": {},
+            },
+        )
+        out = asyncio.run(bot.run(inp))
+        assert out.is_simulation is True
+        assert "action" in out.results

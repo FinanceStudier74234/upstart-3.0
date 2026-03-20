@@ -155,14 +155,26 @@ class Orchestrator:
         short_env = await data_provider.get_short_interest("UPST")
         loan_env = await data_provider.get_stock_loan("UPST")
 
+        # Fetch fundamentals and news from adapters
+        news_env = await data_provider.get_news("UPST", limit=50)
+        financials_env = await data_provider.get_financials("UPST")
+        earnings_env = await data_provider.get_earnings("UPST")
+
+        # Fetch macro indicators
+        macro_env = await data_provider.get_macro("FED_FUNDS")
+
         # Track data sources
         analysis.data_sources = {
             "quote": upst_quote.source,
             "bars": upst_bars_env.source,
             "options": options_env.source,
             "short": short_env.source,
+            "news": news_env.source,
+            "fundamentals": financials_env.source,
+            "macro": macro_env.source,
         }
-        for env in [upst_quote, upst_bars_env, options_env, short_env]:
+        for env in [upst_quote, upst_bars_env, options_env, short_env,
+                     news_env, financials_env, earnings_env, macro_env]:
             warnings.extend(env.warnings)
 
         # Parse price
@@ -175,13 +187,17 @@ class Orchestrator:
 
         # ── 2. Technical Analysis ──
         if not upst_df.empty:
-            tech_snap = self.technical_engine.analyze(upst_df, "UPST")
-            analysis.technical = self._snapshot_to_dict(tech_snap)
+            tech_snap = self._safe_engine_call(
+                "technical", self.technical_engine.analyze, upst_df, "UPST")
+            if tech_snap:
+                analysis.technical = self._snapshot_to_dict(tech_snap)
 
         # ── 3. Options Analysis ──
         if options_env.data:
-            opts_snap = self.options_engine.analyze(options_env.data, "UPST")
-            analysis.options = self._snapshot_to_dict(opts_snap)
+            opts_snap = self._safe_engine_call(
+                "options", self.options_engine.analyze, options_env.data, "UPST")
+            if opts_snap:
+                analysis.options = self._snapshot_to_dict(opts_snap)
 
         # ── 4. Short Analysis ──
         short_snap = self._safe_engine_call(
@@ -196,35 +212,47 @@ class Orchestrator:
         upst_returns = None
         spy_returns = None
         if not upst_df.empty and not spy_df.empty:
-            spy_rel = self.spy_beta_engine.analyze(upst_df, spy_df)
-            analysis.spy_relationship = self._snapshot_to_dict(spy_rel)
+            spy_rel = self._safe_engine_call(
+                "spy_beta", self.spy_beta_engine.analyze, upst_df, spy_df)
+            if spy_rel:
+                analysis.spy_relationship = self._snapshot_to_dict(spy_rel)
             upst_returns = upst_df["close"].pct_change().dropna().values
             spy_returns = spy_df["close"].pct_change().dropna().values
 
         # ── 6. New Engines ──
-        # Valuation
-        val_snap = self.valuation_engine.analyze(price=analysis.price)
-        analysis.valuation = self._snapshot_to_dict(val_snap)
+        # Valuation (pass fundamentals data if available)
+        val_snap = self._safe_engine_call(
+            "valuation", self.valuation_engine.analyze,
+            price=analysis.price, fundamentals=financials_env.data)
+        if val_snap:
+            analysis.valuation = self._snapshot_to_dict(val_snap)
 
         # Funding
-        fund_snap = self.funding_engine.analyze()
-        analysis.funding = self._snapshot_to_dict(fund_snap)
+        fund_snap = self._safe_engine_call("funding", self.funding_engine.analyze)
+        if fund_snap:
+            analysis.funding = self._snapshot_to_dict(fund_snap)
 
         # Origination
-        orig_snap = self.origination_engine.analyze()
-        analysis.origination = self._snapshot_to_dict(orig_snap)
+        orig_snap = self._safe_engine_call("origination", self.origination_engine.analyze)
+        if orig_snap:
+            analysis.origination = self._snapshot_to_dict(orig_snap)
 
-        # Macro
-        macro_snap = self.macro_engine.analyze({})
-        analysis.macro = self._snapshot_to_dict(macro_snap)
+        # Macro (pass adapter data)
+        macro_data = macro_env.data if macro_env.data else {}
+        macro_snap = self._safe_engine_call("macro", self.macro_engine.analyze, macro_data)
+        if macro_snap:
+            analysis.macro = self._snapshot_to_dict(macro_snap)
 
         # Factor
-        factor_snap = self.factor_engine.analyze(upst_returns, spy_returns)
-        analysis.factor = self._snapshot_to_dict(factor_snap)
+        factor_snap = self._safe_engine_call(
+            "factor", self.factor_engine.analyze, upst_returns, spy_returns)
+        if factor_snap:
+            analysis.factor = self._snapshot_to_dict(factor_snap)
 
         # Stress
-        stress_snap = self.stress_engine.analyze()
-        analysis.stress = self._snapshot_to_dict(stress_snap)
+        stress_snap = self._safe_engine_call("stress", self.stress_engine.analyze)
+        if stress_snap:
+            analysis.stress = self._snapshot_to_dict(stress_snap)
 
         # Reflexivity
         reflex_snap = self._safe_engine_call(
@@ -235,38 +263,48 @@ class Orchestrator:
             analysis.reflexivity = self._snapshot_to_dict(reflex_snap)
 
         # Execution
-        exec_snap = self.execution_engine.analyze(price=analysis.price)
-        analysis.execution = self._snapshot_to_dict(exec_snap)
+        exec_snap = self._safe_engine_call(
+            "execution", self.execution_engine.analyze, price=analysis.price)
+        if exec_snap:
+            analysis.execution = self._snapshot_to_dict(exec_snap)
 
         # Data Governance
-        dg_snap = self.data_governance_engine.analyze()
-        analysis.data_governance = self._snapshot_to_dict(dg_snap)
+        dg_snap = self._safe_engine_call("data_governance", self.data_governance_engine.analyze)
+        if dg_snap:
+            analysis.data_governance = self._snapshot_to_dict(dg_snap)
 
         # Catalyst
-        cat_snap = self.catalyst_engine.analyze()
-        analysis.catalyst = self._snapshot_to_dict(cat_snap)
+        cat_snap = self._safe_engine_call("catalyst", self.catalyst_engine.analyze)
+        if cat_snap:
+            analysis.catalyst = self._snapshot_to_dict(cat_snap)
 
         # Overfitting
-        of_snap = self.overfitting_engine.analyze()
-        analysis.overfitting = self._snapshot_to_dict(of_snap)
+        of_snap = self._safe_engine_call("overfitting", self.overfitting_engine.analyze)
+        if of_snap:
+            analysis.overfitting = self._snapshot_to_dict(of_snap)
 
         # Behavioral
-        behav_snap = self.behavioral_engine.analyze(
+        behav_snap = self._safe_engine_call(
+            "behavioral", self.behavioral_engine.analyze,
             technical=analysis.technical,
             options=analysis.options,
             short=analysis.short,
         )
-        analysis.behavioral = self._snapshot_to_dict(behav_snap)
+        if behav_snap:
+            analysis.behavioral = self._snapshot_to_dict(behav_snap)
 
-        # News
-        news_snap = self.news_engine.analyze()
-        analysis.news = self._snapshot_to_dict(news_snap)
+        # News (pass adapter data)
+        news_snap = self._safe_engine_call(
+            "news", self.news_engine.analyze, news_data=news_env.data)
+        if news_snap:
+            analysis.news = self._snapshot_to_dict(news_snap)
 
         # Learning
         analysis.learning = self.learning_engine.get_report()
 
         # ── 7. Scores (now with all engine data) ──
-        scores = self.scoring_engine.compute_all(
+        scores = self._safe_engine_call(
+            "scoring", self.scoring_engine.compute_all,
             technical=analysis.technical,
             options=analysis.options,
             short=analysis.short,
@@ -278,51 +316,61 @@ class Orchestrator:
             spy_rel=analysis.spy_relationship,
             forecast=analysis.forecast,
         )
-        analysis.scores = {k: {"value": v.value, "components": v.components, "explanation": v.explanation}
-                           for k, v in scores.items()}
+        if scores:
+            analysis.scores = {k: {"value": v.value, "components": v.components, "explanation": v.explanation}
+                               for k, v in scores.items()}
 
         # ── 8. Trade Decision (with behavioral context) ──
-        decision = self.trade_decision_engine.decide(
-            scores, analysis.technical, analysis.options,
+        decision = self._safe_engine_call(
+            "trade_decision", self.trade_decision_engine.decide,
+            scores or {}, analysis.technical, analysis.options,
             analysis.short, analysis.spy_relationship,
             macro=analysis.macro,
             price=analysis.price,
             behavioral=analysis.behavioral,
         )
-        analysis.trade_decision = self._snapshot_to_dict(decision)
+        if decision:
+            analysis.trade_decision = self._snapshot_to_dict(decision)
 
         # ── 9. Forecast ──
         if not upst_df.empty:
             beta = analysis.spy_relationship.get("beta", 1.5) or 1.5
-            ensemble = self.forecast_engine.forecast(upst_df, "UPST", spy_beta=beta)
-            analysis.forecast = {
-                "ensemble_point": ensemble.ensemble_point,
-                "ensemble_lower": ensemble.ensemble_lower,
-                "ensemble_upper": ensemble.ensemble_upper,
-                "model_agreement": ensemble.model_agreement,
-                "confidence_score": ensemble.confidence_score,
-                "models": [
-                    {"name": f.model_name, "point": f.point_estimate,
-                     "lower": f.lower_bound, "upper": f.upper_bound}
-                    for f in ensemble.individual_forecasts
-                ],
-            }
+            ensemble = self._safe_engine_call(
+                "forecast", self.forecast_engine.forecast,
+                upst_df, "UPST", spy_beta=beta)
+            if ensemble:
+                analysis.forecast = {
+                    "ensemble_point": ensemble.ensemble_point,
+                    "ensemble_lower": ensemble.ensemble_lower,
+                    "ensemble_upper": ensemble.ensemble_upper,
+                    "model_agreement": ensemble.model_agreement,
+                    "confidence_score": ensemble.confidence_score,
+                    "models": [
+                        {"name": f.model_name, "point": f.point_estimate,
+                         "lower": f.lower_bound, "upper": f.upper_bound}
+                        for f in ensemble.individual_forecasts
+                    ],
+                }
 
         # ── 10. Risk ──
         if not upst_df.empty:
             returns = upst_df["close"].pct_change().dropna().values
-            risk = self.risk_engine.compute_risk(returns, analysis.price)
-            analysis.risk = self._snapshot_to_dict(risk)
+            risk = self._safe_engine_call(
+                "risk", self.risk_engine.compute_risk, returns, analysis.price)
+            if risk:
+                analysis.risk = self._snapshot_to_dict(risk)
 
         # ── 11. Probability ──
         if upst_returns is not None:
             target = analysis.trade_decision.get("target_price")
             stop = analysis.trade_decision.get("stop_price")
-            prob_snap = self.probability_engine.analyze(
+            prob_snap = self._safe_engine_call(
+                "probability", self.probability_engine.analyze,
                 upst_returns, analysis.price, target, stop,
                 short_data=analysis.short,
             )
-            analysis.probability = self._snapshot_to_dict(prob_snap)
+            if prob_snap:
+                analysis.probability = self._snapshot_to_dict(prob_snap)
 
         analysis.warnings = warnings
         return analysis
@@ -436,8 +484,12 @@ class Orchestrator:
             for k, v in asdict(obj).items():
                 if isinstance(v, type(None)):
                     result[k] = None
-                elif hasattr(v, 'tolist'):  # numpy arrays
-                    continue  # Skip large arrays in API response
+                elif hasattr(v, 'tolist'):
+                    # Preserve small arrays (probability cones, paths, etc.)
+                    arr = v.tolist() if hasattr(v, 'tolist') else v
+                    if isinstance(arr, list) and len(arr) <= 500:
+                        result[k] = arr
+                    # Skip very large arrays to keep response size manageable
                 else:
                     result[k] = v
             return result

@@ -1,4 +1,5 @@
 import React from 'react'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -21,16 +22,37 @@ export default function RiskPanel({ analysis }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Position Sizing Recommendations">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div><span className="text-terminal-muted">Vol-Target:</span> {r.vol_target_size_pct?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">Full Kelly:</span> {r.kelly_size_pct?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">1/4 Kelly:</span> {r.quarter_kelly_pct?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">Max-Loss:</span> {r.max_loss_size_pct?.toFixed(1)}%</div>
-            <div className="col-span-2 mt-2 p-2 bg-terminal-bg rounded">
-              <span className="text-terminal-muted">Recommended: </span>
-              <span className="text-terminal-cyan font-bold">{r.recommended_size_pct?.toFixed(1)}% of portfolio</span>
-            </div>
-          </div>
+          {(() => {
+            const sizingData = [
+              { method: 'Vol-Target', pct: r.vol_target_size_pct || 0, fill: '#3b82f6' },
+              { method: 'Full Kelly', pct: r.kelly_size_pct || 0, fill: '#8b5cf6' },
+              { method: '1/4 Kelly', pct: r.quarter_kelly_pct || 0, fill: '#06b6d4' },
+              { method: 'Max-Loss', pct: r.max_loss_size_pct || 0, fill: '#f59e0b' },
+              { method: 'Recommended', pct: r.recommended_size_pct || 0, fill: '#10b981' },
+            ]
+            return (
+              <>
+                <ResponsiveContainer width="100%" height={140}>
+                  <BarChart data={sizingData} layout="vertical" margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+                    <XAxis type="number" tick={{ fill: '#6b7280', fontSize: 10 }}
+                      tickFormatter={(v) => `${v.toFixed(1)}%`} />
+                    <YAxis type="category" dataKey="method" tick={{ fill: '#e5e7eb', fontSize: 10 }} width={80} />
+                    <Tooltip contentStyle={{ background: '#111827', border: '1px solid #1f2937', fontSize: 11 }}
+                      formatter={(v) => `${Number(v).toFixed(2)}%`} />
+                    <Bar dataKey="pct" name="Size %">
+                      {sizingData.map((entry, idx) => (
+                        <Cell key={idx} fill={entry.fill} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="mt-2 p-2 bg-terminal-bg rounded text-xs">
+                  <span className="text-terminal-muted">Recommended: </span>
+                  <span className="text-terminal-cyan font-bold">{r.recommended_size_pct?.toFixed(1)}% of portfolio</span>
+                </div>
+              </>
+            )
+          })()}
         </Panel>
 
         <Panel title="Tail Risk & Distribution">

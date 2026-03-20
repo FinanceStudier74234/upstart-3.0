@@ -17,6 +17,10 @@ import RiskPanel from './components/risk/RiskPanel'
 import CatalystPanel from './components/catalyst/CatalystPanel'
 import ReportsPanel from './components/reports/ReportsPanel'
 import BotLab from './components/bots/BotLab'
+import BehavioralPanel from './components/behavioral/BehavioralPanel'
+import NewsPanel from './components/news/NewsPanel'
+import ExecutionPanel from './components/execution/ExecutionPanel'
+import LearningPanel from './components/learning/LearningPanel'
 
 const TABS = [
   { id: 'dashboard', label: 'Dashboard' },
@@ -34,17 +38,26 @@ const TABS = [
   { id: 'catalyst', label: 'Catalysts' },
   { id: 'backtest', label: 'Backtest' },
   { id: 'risk', label: 'Risk/Sizing' },
+  { id: 'behavioral', label: 'Behavioral' },
+  { id: 'news', label: 'News/Sentiment' },
+  { id: 'execution', label: 'Execution' },
+  { id: 'learning', label: 'Learning Loop' },
   { id: 'reports', label: 'Reports/Alerts' },
   { id: 'bots', label: 'Bot Lab' },
 ]
 
 export default function App() {
-  const { analysis, activeTab, setActiveTab, fetchAnalysis, loading, error } = useStore()
+  const { analysis, activeTab, setActiveTab, fetchAnalysis, loading, error,
+          wsConnected, connectWebSocket, disconnectWebSocket } = useStore()
 
   useEffect(() => {
     fetchAnalysis()
+    connectWebSocket()
     const interval = setInterval(fetchAnalysis, 60000)
-    return () => clearInterval(interval)
+    return () => {
+      clearInterval(interval)
+      disconnectWebSocket()
+    }
   }, [])
 
   return (
@@ -54,6 +67,9 @@ export default function App() {
         <div className="text-terminal-cyan font-black text-sm tracking-wider">UPST QUANT HUB</div>
         <div className="text-[10px] text-terminal-muted">v3.0 | Institutional Single-Name Intelligence Platform</div>
         <div className="ml-auto flex items-center gap-2">
+          <span className={`text-[10px] ${wsConnected ? 'text-terminal-green' : 'text-terminal-muted'}`}>
+            {wsConnected ? '● LIVE' : '○ POLL'}
+          </span>
           {loading && <span className="text-terminal-amber text-[10px] animate-pulse">UPDATING...</span>}
           {error && <span className="text-terminal-red text-[10px]">ERR: {error}</span>}
         </div>
@@ -88,6 +104,10 @@ export default function App() {
         {activeTab === 'catalyst' && <CatalystPanel analysis={analysis} />}
         {activeTab === 'backtest' && <BacktestPanel />}
         {activeTab === 'risk' && <RiskPanel analysis={analysis} />}
+        {activeTab === 'behavioral' && <BehavioralPanel analysis={analysis} />}
+        {activeTab === 'news' && <NewsPanel analysis={analysis} />}
+        {activeTab === 'execution' && <ExecutionPanel analysis={analysis} />}
+        {activeTab === 'learning' && <LearningPanel analysis={analysis} />}
         {activeTab === 'reports' && <ReportsPanel analysis={analysis} />}
         {activeTab === 'bots' && <BotLab />}
       </main>
