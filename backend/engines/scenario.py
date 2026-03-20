@@ -120,13 +120,14 @@ class ScenarioEngine:
         out.adjusted_downside_pct = round(abs(min(0, total_impact * 100)), 2)
         out.spy_adjusted_expected_move = round(spy_impact, 2)
 
-        # ── Probabilities (heuristic) ──
+        # ── Probabilities (heuristic, must stay in [0, 1] and sum <= 1) ──
+        flat_prob = 0.10  # reserved for flat/unchanged outcome
         if total_impact > 0.02:
             out.probability_up = round(min(0.85, 0.5 + total_impact), 4)
-            out.probability_down = round(1 - out.probability_up - 0.1, 4)
+            out.probability_down = round(max(0.05, 1 - out.probability_up - flat_prob), 4)
         elif total_impact < -0.02:
             out.probability_down = round(min(0.85, 0.5 - total_impact), 4)
-            out.probability_up = round(1 - out.probability_down - 0.1, 4)
+            out.probability_up = round(max(0.05, 1 - out.probability_down - flat_prob), 4)
         else:
             out.probability_up = 0.35
             out.probability_down = 0.35

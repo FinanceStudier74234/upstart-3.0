@@ -111,7 +111,8 @@ class ValuationEngine:
         peer_ps = [p["ps"] for p in snap.peer_multiples if p.get("ps")]
         if peer_ps and snap.price_to_sales:
             median_ps = sorted(peer_ps)[len(peer_ps) // 2]
-            snap.vs_peer_median = round((snap.price_to_sales / median_ps - 1) * 100, 1)
+            if median_ps > 0:
+                snap.vs_peer_median = round((snap.price_to_sales / median_ps - 1) * 100, 1)
 
         # Simplified DCF
         snap.dcf_value = self._simple_dcf(fcf, growth, snap.wacc, shares)
@@ -156,6 +157,8 @@ class ValuationEngine:
             g = growth if year <= 5 else growth * 0.5
             cf *= (1 + g)
             total += cf / (1 + wacc) ** year
+        if wacc <= 0.03:
+            return None  # WACC must exceed terminal growth rate
         terminal = cf * (1 + 0.03) / (wacc - 0.03)
         total += terminal / (1 + wacc) ** 10
         return round(total / shares, 2)

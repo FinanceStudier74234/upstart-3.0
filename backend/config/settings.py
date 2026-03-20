@@ -15,8 +15,8 @@ class Settings(BaseSettings):
     app_env: str = "development"
     app_port: int = 8000
     app_host: str = "0.0.0.0"
-    app_secret_key: str = "change-me"
-    app_debug: bool = True
+    app_secret_key: str = ""  # MUST be set via APP_SECRET_KEY env var in production
+    app_debug: bool = False  # MUST be explicitly enabled via APP_DEBUG=true
     log_level: str = "INFO"
 
     # ── Database ──
@@ -55,6 +55,14 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    def validate_production(self):
+        """Raise if production settings are unsafe."""
+        if self.is_production:
+            if not self.app_secret_key or self.app_secret_key in ("change-me", ""):
+                raise ValueError("APP_SECRET_KEY must be set to a strong random value in production")
+            if self.app_debug:
+                raise ValueError("APP_DEBUG must be False in production")
 
     def has_polygon(self) -> bool:
         return bool(self.polygon_api_key)

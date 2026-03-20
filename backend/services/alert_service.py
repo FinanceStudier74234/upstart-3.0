@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
+import threading
 from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,7 @@ class AlertService:
     def __init__(self):
         self._alerts: list[Alert] = []
         self._alert_counter = 0
+        self._lock = threading.Lock()
 
     def evaluate(self, analysis: dict) -> list[Alert]:
         """Run all alert rules against current analysis."""
@@ -142,29 +144,34 @@ class AlertService:
                 f"{len(warnings)} data quality warnings — review data sources",
             ))
 
-        self._alerts = new_alerts + self._alerts
-        self._alerts = self._alerts[:100]  # keep last 100
+        with self._lock:
+            self._alerts = new_alerts + self._alerts
+            self._alerts = self._alerts[:100]  # keep last 100
 
         return new_alerts
 
     def get_alerts(self, severity: str | None = None, limit: int = 50) -> list[dict]:
-        alerts = self._alerts
+        with self._lock:
+            alerts = list(self._alerts)
         if severity:
             alerts = [a for a in alerts if a.severity == severity]
         return [self._alert_to_dict(a) for a in alerts[:limit]]
 
     def acknowledge(self, alert_id: str) -> bool:
-        for a in self._alerts:
-            if a.id == alert_id:
-                a.acknowledged = True
-                return True
+        with self._lock:
+            for a in self._alerts:
+                if a.id == alert_id:
+                    a.acknowledged = True
+                    return True
         return False
 
     def _make_alert(self, timestamp, severity, category, title, message,
                     value=None, threshold=None, action_required=False) -> Alert:
-        self._alert_counter += 1
+        with self._lock:
+            self._alert_counter += 1
+            alert_id = f"alert_{self._alert_counter}"
         return Alert(
-            id=f"alert_{self._alert_counter}",
+            id=alert_id,
             timestamp=timestamp,
             severity=severity,
             category=category,

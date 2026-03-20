@@ -44,9 +44,9 @@ async def quote(ticker: str = "UPST"):
 
 @router.get("/bars")
 async def bars(
-    ticker: str = "UPST",
-    timeframe: str = "1d",
-    days: int = 365,
+    ticker: str = Query("UPST", max_length=10, pattern=r"^[A-Z]{1,5}$"),
+    timeframe: str = Query("1d", pattern=r"^(1m|5m|15m|1h|1d|1w)$"),
+    days: int = Query(365, ge=1, le=3650),
 ):
     import datetime as dt
     from backend.adapters.provider import data_provider
@@ -285,7 +285,10 @@ async def macro_indicator(indicator: str):
 
 # ── News ──
 @router.get("/news")
-async def news(ticker: str = "UPST", limit: int = 20):
+async def news(
+    ticker: str = Query("UPST", max_length=10, pattern=r"^[A-Z]{1,5}$"),
+    limit: int = Query(20, ge=1, le=100),
+):
     from backend.adapters.provider import data_provider
     env = await data_provider.get_news(ticker, limit)
     return {"data": env.data, "source": env.source}
@@ -293,7 +296,10 @@ async def news(ticker: str = "UPST", limit: int = 20):
 
 # ── Alerts ──
 @router.get("/alerts")
-async def alerts(severity: str | None = None, limit: int = 50):
+async def alerts(
+    severity: str | None = Query(None, pattern=r"^(info|warning|critical)$"),
+    limit: int = Query(50, ge=1, le=200),
+):
     """Get recent system alerts."""
     return {"alerts": alert_service.get_alerts(severity, limit)}
 
@@ -362,7 +368,7 @@ async def websocket_endpoint(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text('{"event":"pong"}')
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        await ws_manager.disconnect(websocket)
 
 
 # ── Scheduler Status ──

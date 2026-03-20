@@ -64,9 +64,10 @@ class FactorEngine:
             s = spy_returns[-min_len:]
 
             slope, intercept, r, _, _ = stats.linregress(s, u)
-            snap.market_beta = round(slope, 4)
-            snap.systematic_risk_pct = round(r ** 2 * 100, 1)
-            snap.idiosyncratic_risk_pct = round(100 - snap.systematic_risk_pct, 1)
+            if not np.isnan(slope) and not np.isnan(r):
+                snap.market_beta = round(slope, 4)
+                snap.systematic_risk_pct = round(r ** 2 * 100, 1)
+                snap.idiosyncratic_risk_pct = round(100 - snap.systematic_risk_pct, 1)
 
         if factor_data:
             for k, v in factor_data.items():

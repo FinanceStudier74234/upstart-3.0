@@ -93,8 +93,12 @@ class TechnicalEngine:
         # ── Moving Averages ──
         for p in MA_PERIODS:
             if len(close) >= p:
-                snap.sma[p] = round(float(close.rolling(p).mean().iloc[-1]), 4)
-                snap.ema[p] = round(float(close.ewm(span=p, adjust=False).mean().iloc[-1]), 4)
+                sma_val = close.rolling(p).mean().iloc[-1]
+                ema_val = close.ewm(span=p, adjust=False).mean().iloc[-1]
+                if pd.notna(sma_val):
+                    snap.sma[p] = round(float(sma_val), 4)
+                if pd.notna(ema_val):
+                    snap.ema[p] = round(float(ema_val), 4)
 
         # ── RSI ──
         snap.rsi = self._rsi(close, RSI_PERIOD)
@@ -113,8 +117,11 @@ class TechnicalEngine:
         if len(close) >= BOLLINGER_PERIOD:
             sma = close.rolling(BOLLINGER_PERIOD).mean()
             std = close.rolling(BOLLINGER_PERIOD).std()
-            snap.bollinger_upper = round(float(sma.iloc[-1] + BOLLINGER_STD * std.iloc[-1]), 4)
-            snap.bollinger_lower = round(float(sma.iloc[-1] - BOLLINGER_STD * std.iloc[-1]), 4)
+            sma_last = sma.iloc[-1]
+            std_last = std.iloc[-1]
+            if pd.notna(sma_last) and pd.notna(std_last):
+                snap.bollinger_upper = round(float(sma_last + BOLLINGER_STD * std_last), 4)
+                snap.bollinger_lower = round(float(sma_last - BOLLINGER_STD * std_last), 4)
             bw = snap.bollinger_upper - snap.bollinger_lower
             if bw > 0:
                 snap.bollinger_pct_b = round((price - snap.bollinger_lower) / bw, 4)
@@ -148,7 +155,10 @@ class TechnicalEngine:
         if len(df) >= 2:
             prev_close = float(close.iloc[-2])
             today_open = float(df["open"].iloc[-1])
-            gap_pct = (today_open - prev_close) / prev_close * 100
+            if prev_close <= 0:
+                gap_pct = 0.0
+            else:
+                gap_pct = (today_open - prev_close) / prev_close * 100
             if gap_pct > 1.0:
                 snap.gap_up = True
                 snap.gap_fill_probability = self._empirical_gap_fill_prob(df, direction="up")
@@ -217,7 +227,8 @@ class TechnicalEngine:
         atr = tr.rolling(period).mean()
         plus_di = 100 * (plus_dm.rolling(period).mean() / atr)
         minus_di = 100 * (minus_dm.rolling(period).mean() / atr)
-        dx = 100 * ((plus_di - minus_di).abs() / (plus_di + minus_di))
+        di_sum = plus_di + minus_di
+        dx = 100 * ((plus_di - minus_di).abs() / di_sum.replace(0, np.nan))
         adx = dx.rolling(period).mean()
         val = adx.iloc[-1]
         return round(float(val), 2) if pd.notna(val) else None
@@ -227,7 +238,8 @@ class TechnicalEngine:
             return None, None
         lowest = low.rolling(k_period).min()
         highest = high.rolling(k_period).max()
-        k = 100 * (close - lowest) / (highest - lowest)
+        hl_range = (highest - lowest).replace(0, np.nan)
+        k = 100 * (close - lowest) / hl_range
         d = k.rolling(d_period).mean()
         k_val = k.iloc[-1]
         d_val = d.iloc[-1]
@@ -282,6 +294,8 @@ class TechnicalEngine:
 
         for i in range(-window, -1):
             prev_c = float(close.iloc[i - 1])
+            if prev_c <= 0:
+                continue
             open_i = float(opens.iloc[i])
             gap_pct = (open_i - prev_c) / prev_c * 100
 

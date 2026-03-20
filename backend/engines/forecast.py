@@ -150,7 +150,16 @@ class ForecastEngine:
         self, close, returns, price, horizon, ticker, now,
     ) -> ForecastResult:
         """Ornstein-Uhlenbeck mean-reversion model."""
-        log_prices = np.log(close.values)
+        prices_arr = close.values.astype(float)
+        if np.any(prices_arr <= 0) or np.any(np.isnan(prices_arr)):
+            return ForecastResult(
+                ticker=ticker, forecast_time=now, horizon_days=horizon,
+                model_name="mean_reversion_ou", point_estimate=price,
+                lower_bound=price * 0.8, upper_bound=price * 1.2,
+                explanation="Non-positive or NaN prices — mean reversion skipped",
+                confidence_score=10.0,
+            )
+        log_prices = np.log(prices_arr)
         mean_log = float(np.mean(log_prices[-252:]))
         half_life = self._estimate_half_life(log_prices)
         if half_life is None or half_life <= 0:

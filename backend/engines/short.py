@@ -308,9 +308,11 @@ class ShortEngine:
                 snap.cover_zones.append((round(s * 0.99, 2), round(s * 1.01, 2)))
 
         # Invalidation = above highest resistance + ATR
-        if tech and tech.get("resistance_levels") and tech.get("atr"):
+        resistance = tech.get("resistance_levels", []) if tech else []
+        atr = tech.get("atr") if tech else None
+        if resistance and atr:
             snap.short_invalidation_level = round(
-                tech["resistance_levels"][-1] + tech["atr"] * 1.5, 2,
+                resistance[-1] + atr * 1.5, 2,
             )
 
     def _compare_bearish_vehicles(self, snap: ShortSnapshot, options: dict | None, price: float) -> dict:

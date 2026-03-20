@@ -29,13 +29,18 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
     )
 
-    # CORS
+    # CORS — never use wildcard origins with credentials
+    allowed_origins = (
+        ["http://localhost:5173", "http://127.0.0.1:5173"]
+        if settings.app_debug
+        else ["http://localhost:5173"]
+    )
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.app_debug else ["http://localhost:5173"],
+        allow_origins=allowed_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
     )
 
     # API routes
@@ -49,6 +54,7 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def startup():
+        settings.validate_production()
         logger.info("UPST Quant Finance Hub v3.0 starting...")
         logger.info("Mock mode: %s", settings.mock_mode)
         logger.info("API docs at http://%s:%s/docs", settings.app_host, settings.app_port)

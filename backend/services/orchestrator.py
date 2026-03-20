@@ -184,11 +184,13 @@ class Orchestrator:
             analysis.options = self._snapshot_to_dict(opts_snap)
 
         # ── 4. Short Analysis ──
-        short_snap = self.short_engine.analyze(
+        short_snap = self._safe_engine_call(
+            "short", self.short_engine.analyze,
             short_env.data, loan_env.data,
             analysis.technical, analysis.options, analysis.price,
         )
-        analysis.short = self._snapshot_to_dict(short_snap)
+        if short_snap:
+            analysis.short = self._snapshot_to_dict(short_snap)
 
         # ── 5. SPY/Beta Relationship ──
         upst_returns = None
@@ -225,9 +227,12 @@ class Orchestrator:
         analysis.stress = self._snapshot_to_dict(stress_snap)
 
         # Reflexivity
-        reflex_snap = self.reflexivity_engine.analyze(
-            upst_returns, analysis.short, analysis.options, analysis.price)
-        analysis.reflexivity = self._snapshot_to_dict(reflex_snap)
+        reflex_snap = self._safe_engine_call(
+            "reflexivity", self.reflexivity_engine.analyze,
+            upst_returns, analysis.short, analysis.options, analysis.price,
+        )
+        if reflex_snap:
+            analysis.reflexivity = self._snapshot_to_dict(reflex_snap)
 
         # Execution
         exec_snap = self.execution_engine.analyze(price=analysis.price)
@@ -415,6 +420,14 @@ class Orchestrator:
             df["bar_time"] = pd.to_datetime(df["bar_time"], utc=True)
             df = df.set_index("bar_time").sort_index()
         return df
+
+    def _safe_engine_call(self, engine_name: str, func, *args, **kwargs):
+        """Call an engine method with error isolation — returns None on failure."""
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error("Engine '%s' failed: %s", engine_name, e, exc_info=True)
+            return None
 
     def _snapshot_to_dict(self, obj: Any) -> dict:
         if hasattr(obj, "__dataclass_fields__"):

@@ -92,6 +92,8 @@ class SPYBetaEngine:
 
         # ── Full-sample OLS regression ──
         slope, intercept, r_value, _, _ = stats.linregress(spy_ret.values, upst_ret.values)
+        if np.isnan(slope) or np.isnan(r_value):
+            return rel  # Return defaults if regression fails
         rel.beta = round(float(slope), 4)
         rel.correlation = round(float(r_value), 4)
         rel.alpha_annualized = round(float(intercept) * 252, 4)
