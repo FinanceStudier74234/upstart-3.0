@@ -36,6 +36,9 @@ from backend.engines.overfitting import OverfittingEngine
 from backend.engines.probability import ProbabilityEngine
 from backend.engines.macro import MacroEngine
 from backend.engines.backtest import BacktestEngine
+from backend.engines.behavioral import BehavioralEngine
+from backend.engines.learning import LearningEngine
+from backend.engines.news import NewsEngine
 from backend.bots.price_action_bot import PriceActionBot
 from backend.bots.squeeze_bot import SqueezeBot
 from backend.bots.macro_shock_bot import MacroShockBot
@@ -79,6 +82,9 @@ class FullAnalysis:
     catalyst: dict = field(default_factory=dict)
     overfitting: dict = field(default_factory=dict)
     probability: dict = field(default_factory=dict)
+    behavioral: dict = field(default_factory=dict)
+    news: dict = field(default_factory=dict)
+    learning: dict = field(default_factory=dict)
 
     # Data quality
     data_sources: dict = field(default_factory=dict)
@@ -114,6 +120,9 @@ class Orchestrator:
         self.probability_engine = ProbabilityEngine()
         self.macro_engine = MacroEngine()
         self.backtest_engine = BacktestEngine()
+        self.behavioral_engine = BehavioralEngine()
+        self.learning_engine = LearningEngine()
+        self.news_engine = NewsEngine()
 
         # Bots
         self.bots = {
@@ -236,6 +245,21 @@ class Orchestrator:
         of_snap = self.overfitting_engine.analyze()
         analysis.overfitting = self._snapshot_to_dict(of_snap)
 
+        # Behavioral
+        behav_snap = self.behavioral_engine.analyze(
+            technical=analysis.technical,
+            options=analysis.options,
+            short=analysis.short,
+        )
+        analysis.behavioral = self._snapshot_to_dict(behav_snap)
+
+        # News
+        news_snap = self.news_engine.analyze()
+        analysis.news = self._snapshot_to_dict(news_snap)
+
+        # Learning
+        analysis.learning = self.learning_engine.get_report()
+
         # ── 7. Scores (now with all engine data) ──
         scores = self.scoring_engine.compute_all(
             technical=analysis.technical,
@@ -245,17 +269,20 @@ class Orchestrator:
             origination=analysis.origination,
             macro=analysis.macro,
             valuation=analysis.valuation,
+            news=analysis.news,
             spy_rel=analysis.spy_relationship,
             forecast=analysis.forecast,
         )
         analysis.scores = {k: {"value": v.value, "components": v.components, "explanation": v.explanation}
                            for k, v in scores.items()}
 
-        # ── 8. Trade Decision ──
+        # ── 8. Trade Decision (with behavioral context) ──
         decision = self.trade_decision_engine.decide(
             scores, analysis.technical, analysis.options,
             analysis.short, analysis.spy_relationship,
+            macro=analysis.macro,
             price=analysis.price,
+            behavioral=analysis.behavioral,
         )
         analysis.trade_decision = self._snapshot_to_dict(decision)
 

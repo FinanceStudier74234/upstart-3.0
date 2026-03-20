@@ -64,6 +64,7 @@ class TradeDecisionEngine:
         spy_rel: dict | None = None,
         macro: dict | None = None,
         price: float = 0.0,
+        behavioral: dict | None = None,
     ) -> TradeRecommendation:
         rec = TradeRecommendation()
         rec.entry_price = price
@@ -71,6 +72,19 @@ class TradeDecisionEngine:
         if not scores:
             rec.explanation = "Insufficient data to generate trade decision."
             return rec
+
+        # Behavioral overrides / adjustments
+        if behavioral:
+            if behavioral.get("capitulation_detected"):
+                # Capitulation = potential reversal opportunity
+                if behavioral.get("capitulation_type") == "long_capitulation":
+                    rec.risk_factors.append("Long capitulation detected — potential reversal buy signal")
+                elif behavioral.get("capitulation_type") == "short_capitulation":
+                    rec.risk_factors.append("Short capitulation detected — squeeze may be imminent")
+            if behavioral.get("panic_selling"):
+                rec.risk_factors.append("Panic selling detected — high volatility, wait for stabilization")
+            if behavioral.get("euphoric_buying"):
+                rec.risk_factors.append("Euphoric buying detected — elevated risk of mean reversion")
 
         # Extract key scores
         composite = scores.get("composite_opportunity", {})

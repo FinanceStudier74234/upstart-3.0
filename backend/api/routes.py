@@ -169,6 +169,27 @@ async def catalyst():
     return analysis.catalyst
 
 
+@router.get("/behavioral")
+async def behavioral():
+    """Behavioral / crowd psychology analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.behavioral
+
+
+@router.get("/news-sentiment")
+async def news_sentiment():
+    """News sentiment analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.news
+
+
+@router.get("/learning")
+async def learning():
+    """Learning engine report."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.learning
+
+
 @router.get("/probability")
 async def probability():
     """Probability estimates and cones."""

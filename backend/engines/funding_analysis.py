@@ -5,7 +5,7 @@ capacity monitoring, concentration risk.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 
 
 @dataclass
@@ -67,7 +67,8 @@ class FundingAnalysisEngine:
 
         facilities = []
         for f in funding_data.get("facilities", []):
-            fac = FundingFacility(**{k: v for k, v in f.items() if hasattr(FundingFacility, k)})
+            _valid = {fld.name for fld in fields(FundingFacility)}
+            fac = FundingFacility(**{k: v for k, v in f.items() if k in _valid})
             facilities.append(fac)
         snap.facilities = facilities
 

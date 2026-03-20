@@ -58,7 +58,7 @@ class CatalystEngine:
         today = dt.date.today()
 
         for evt in events.get("upcoming", []):
-            cat = Catalyst(**{k: v for k, v in evt.items() if hasattr(Catalyst, k)})
+            cat = Catalyst(**{k: v for k, v in evt.items() if k in Catalyst.__dataclass_fields__})
             snap.upcoming.append(cat)
             try:
                 evt_date = dt.date.fromisoformat(cat.date)
@@ -68,7 +68,7 @@ class CatalystEngine:
                 pass
 
         for evt in events.get("recent", []):
-            cat = Catalyst(**{k: v for k, v in evt.items() if hasattr(Catalyst, k)})
+            cat = Catalyst(**{k: v for k, v in evt.items() if k in Catalyst.__dataclass_fields__})
             snap.recent.append(cat)
 
         # Earnings
