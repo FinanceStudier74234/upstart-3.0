@@ -1,4 +1,9 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  Cell,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -70,23 +75,39 @@ export default function LearningPanel({ analysis }) {
         </Panel>
       )}
 
-      {/* Model Weights Visualization */}
+      {/* Model Weights Chart */}
       {l.model_weights && Object.keys(l.model_weights).length > 0 && (
         <Panel title="Current Model Weights">
-          <div className="space-y-2">
-            {Object.entries(l.model_weights).sort((a, b) => b[1] - a[1]).map(([model, weight]) => (
-              <div key={model} className="flex items-center gap-3 text-xs">
-                <span className="w-28 text-terminal-muted shrink-0">{model}</span>
-                <div className="flex-1 h-4 bg-terminal-bg rounded overflow-hidden">
-                  <div className="h-full bg-terminal-cyan rounded transition-all"
-                    style={{ width: `${Math.min(weight * 100 * 4, 100)}%` }} />
-                </div>
-                <span className="w-12 text-right text-terminal-text font-bold">
-                  {(weight * 100).toFixed(1)}%
-                </span>
-              </div>
-            ))}
-          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={Object.entries(l.model_weights).sort((a, b) => b[1] - a[1]).map(([model, weight]) => ({
+              model, weight: weight * 100,
+            }))} layout="vertical">
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis type="number" tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+              <YAxis type="category" dataKey="model" tick={{ fontSize: 9, fill: '#9ca3af' }} width={90} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={v => [`${v.toFixed(1)}%`, 'Weight']} />
+              <Bar dataKey="weight" fill="#06b6d4" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
+
+      {/* Model Accuracy Comparison */}
+      {l.model_performance && Object.keys(l.model_performance).length > 0 && (
+        <Panel title="Model Accuracy Comparison">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={Object.entries(l.model_performance).map(([model, perf]) => ({
+              model, accuracy: (perf.direction_accuracy || 0) * 100, mae: (perf.mae || 0) * 100,
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="model" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+              <Bar dataKey="accuracy" fill="#10b981" name="Dir. Accuracy %" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="mae" fill="#f59e0b" name="MAE %" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </Panel>
       )}
 

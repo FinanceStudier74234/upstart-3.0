@@ -1,4 +1,8 @@
 import React, { useState } from 'react'
+import {
+  LineChart, Line, AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, ReferenceLine,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import { api } from '../../services/api'
@@ -95,6 +99,82 @@ export default function BacktestPanel() {
               </div>
             </Panel>
           </div>
+
+          {/* Equity Curve Chart */}
+          {result.equity_curve && result.equity_curve.length > 1 && (
+            <Panel title="Equity Curve">
+              <ResponsiveContainer width="100%" height={220}>
+                <LineChart data={result.equity_curve.map((v, i) => ({ idx: i, equity: v }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={['auto', 'auto']}
+                    tickFormatter={v => `$${(v/1000).toFixed(0)}k`} />
+                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                    formatter={v => [`$${v.toLocaleString()}`, 'Equity']} />
+                  <Line type="monotone" dataKey="equity" stroke="#06b6d4" strokeWidth={2} dot={false} />
+                  <ReferenceLine y={100000} stroke="#6b7280" strokeDasharray="3 3" label={{ value: 'Start', fill: '#6b7280', fontSize: 9 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </Panel>
+          )}
+
+          {/* Drawdown Chart */}
+          {result.drawdown_series && result.drawdown_series.length > 1 && (
+            <Panel title="Drawdown">
+              <ResponsiveContainer width="100%" height={160}>
+                <AreaChart data={result.drawdown_series.map((v, i) => ({ idx: i, dd: v }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                    formatter={v => [`${v.toFixed(2)}%`, 'Drawdown']} />
+                  <Area type="monotone" dataKey="dd" stroke="#ef4444" fill="#ef4444" fillOpacity={0.3} />
+                  <ReferenceLine y={0} stroke="#6b7280" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Panel>
+          )}
+
+          {/* Trade P&L Distribution */}
+          {result.trades && result.trades.length > 1 && (
+            <Panel title="Trade P&L Distribution">
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={result.trades.map((t, i) => ({ idx: i + 1, pnl: t.pnl_pct }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="idx" tick={{ fontSize: 9, fill: '#9ca3af' }} label={{ value: 'Trade #', position: 'insideBottom', offset: -2, fontSize: 9, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                    formatter={v => [`${v.toFixed(2)}%`, 'P&L']} />
+                  <ReferenceLine y={0} stroke="#6b7280" />
+                  <Bar dataKey="pnl" fill="#06b6d4"
+                    shape={(props) => {
+                      const { x, y, width, height, payload } = props
+                      const color = payload.pnl >= 0 ? '#10b981' : '#ef4444'
+                      return <rect x={x} y={y} width={width} height={height} fill={color} rx={1} />
+                    }} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Panel>
+          )}
+
+          {/* Regime Performance */}
+          {result.performance_by_regime && Object.keys(result.performance_by_regime).length > 0 && (
+            <Panel title="Performance by Market Regime">
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={Object.entries(result.performance_by_regime).map(([regime, d]) => ({
+                  regime: regime.charAt(0).toUpperCase() + regime.slice(1),
+                  avg_pnl: d.avg_pnl, win_rate: d.win_rate, trades: d.trades,
+                }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="regime" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+                  <Bar dataKey="avg_pnl" fill="#06b6d4" name="Avg P&L %" radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="win_rate" fill="#8b5cf6" name="Win Rate %" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </Panel>
+          )}
 
           {result.trades && result.trades.length > 0 && (
             <Panel title={`Trade List (${result.trades.length} trades)`}>

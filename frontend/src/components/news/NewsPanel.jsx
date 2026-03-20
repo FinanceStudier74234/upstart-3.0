@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -50,6 +54,46 @@ export default function NewsPanel({ analysis }) {
             ))}
           </div>
         </Panel>
+      )}
+
+      {/* Category Distribution Chart */}
+      {n.category_breakdown && Object.keys(n.category_breakdown).length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel title="Category Distribution">
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={Object.entries(n.category_breakdown).map(([cat, count]) => ({ cat, count }))} layout="vertical">
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                <XAxis type="number" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                <YAxis type="category" dataKey="cat" tick={{ fontSize: 9, fill: '#9ca3af' }} width={80} />
+                <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+                <Bar dataKey="count" fill="#06b6d4" name="Articles" radius={[0, 4, 4, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Panel>
+          <Panel title="Sentiment Composition">
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie data={(() => {
+                  const articles = n.articles || []
+                  const pos = articles.filter(a => (a.sentiment_score || 0) > 0.2).length
+                  const neg = articles.filter(a => (a.sentiment_score || 0) < -0.2).length
+                  const neu = articles.length - pos - neg
+                  return [
+                    { name: 'Positive', value: pos },
+                    { name: 'Neutral', value: neu },
+                    { name: 'Negative', value: neg },
+                  ].filter(d => d.value > 0)
+                })()} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
+                  <Cell fill="#10b981" />
+                  <Cell fill="#6b7280" />
+                  <Cell fill="#ef4444" />
+                </Pie>
+                <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </Panel>
+        </div>
       )}
 
       {/* News Articles */}

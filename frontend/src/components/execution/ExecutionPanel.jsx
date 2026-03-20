@@ -1,4 +1,7 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -82,19 +85,41 @@ export default function ExecutionPanel({ analysis }) {
         </div>
       </Panel>
 
-      {/* Intraday Patterns */}
-      {e.intraday_pattern && (
-        <Panel title="Intraday Volume Pattern">
-          <div className="grid grid-cols-4 gap-2 text-xs">
-            {Object.entries(e.intraday_pattern).map(([period, pct]) => (
-              <div key={period} className="p-2 bg-terminal-bg rounded">
-                <div className="text-terminal-muted mb-1">{period}</div>
-                <div className="text-terminal-text font-bold">
-                  {typeof pct === 'number' ? `${(pct * 100).toFixed(0)}%` : pct}
-                </div>
-              </div>
-            ))}
-          </div>
+      {/* Intraday Volume Profile Chart */}
+      {e.intraday_pattern && Object.keys(e.intraday_pattern).length > 0 && (
+        <Panel title="Intraday Volume Profile">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={Object.entries(e.intraday_pattern).map(([period, pct]) => ({
+              period, pct: typeof pct === 'number' ? pct * 100 : 0,
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="period" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={v => [`${v.toFixed(1)}%`, 'Volume Share']} />
+              <Bar dataKey="pct" fill="#06b6d4" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
+
+      {/* Slippage Comparison Chart */}
+      {(e.slippage_100 != null || e.slippage_1000 != null) && (
+        <Panel title="Estimated Slippage by Size">
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={[
+              { size: '100 sh', slippage: (e.slippage_100 || 0) * 100 },
+              { size: '1K sh', slippage: (e.slippage_1000 || 0) * 100 },
+              { size: '10K sh', slippage: (e.slippage_10000 || 0) * 100 },
+            ]}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="size" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={v => [`${v.toFixed(3)}%`, 'Slippage']} />
+              <Bar dataKey="slippage" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </Panel>
       )}
 

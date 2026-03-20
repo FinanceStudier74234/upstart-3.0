@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  Cell, ReferenceLine,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -62,8 +66,49 @@ export default function ValuationPanel({ analysis }) {
         </Panel>
       </div>
 
+      {/* Fair Value Bridge Chart */}
+      {(v.fair_value_bear || v.fair_value_base || v.fair_value_bull) && (
+        <Panel title="Valuation Bridge">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={[
+              { scenario: 'Bear', value: v.fair_value_bear || 0 },
+              { scenario: 'Base', value: v.fair_value_base || 0 },
+              { scenario: 'Bull', value: v.fair_value_bull || 0 },
+            ]}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="scenario" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `$${v}`} domain={[0, 'auto']} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={val => [`$${val.toFixed(2)}`, 'Fair Value']} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                <Cell fill="#ef4444" />
+                <Cell fill="#06b6d4" />
+                <Cell fill="#10b981" />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
+
+      {/* Peer Comparison Chart */}
       <Panel title="Peer Comparison">
-        <div className="overflow-x-auto">
+        {(v.peer_multiples || []).length > 0 && (
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={[
+              { ticker: 'UPST', ps: v.price_to_sales || 0, ev_rev: v.ev_revenue || 0 },
+              ...(v.peer_multiples || []).map(p => ({ ticker: p.ticker, ps: p.ps || 0, ev_rev: p.ev_rev || 0 })),
+            ]}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="ticker" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}x`} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={val => [`${val.toFixed(1)}x`]} />
+              <Bar dataKey="ps" fill="#06b6d4" name="P/S" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="ev_rev" fill="#8b5cf6" name="EV/Rev" radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        )}
+        <div className="overflow-x-auto mt-2">
           <table className="w-full text-[10px]">
             <thead>
               <tr className="text-terminal-muted border-b border-terminal-border">

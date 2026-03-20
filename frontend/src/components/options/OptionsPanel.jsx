@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, Legend, ReferenceLine,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -72,6 +76,60 @@ export default function OptionsPanel({ analysis }) {
           </div>
         </Panel>
       </div>
+
+      {/* IV vs RV Comparison Chart */}
+      <Panel title="Implied vs Realized Volatility">
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={[
+            { label: 'IV 30d', value: (o.iv_30d || 0) * 100 },
+            { label: 'RV 30d', value: (o.realized_vol_30d || 0) * 100 },
+            { label: 'ATM IV', value: (o.atm_iv || 0) * 100 },
+          ].filter(d => d.value > 0)}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+            <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+              formatter={v => [`${v.toFixed(1)}%`, 'Vol']} />
+            <Bar dataKey="value" radius={[4, 4, 0, 0]} fill="#8b5cf6" />
+          </BarChart>
+        </ResponsiveContainer>
+      </Panel>
+
+      {/* Put/Call Volume & OI Pie Charts */}
+      {(o.total_call_volume || o.total_put_volume) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Panel title="Volume Split">
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie data={[
+                  { name: 'Calls', value: o.total_call_volume || 0 },
+                  { name: 'Puts', value: o.total_put_volume || 0 },
+                ]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
+                  <Cell fill="#10b981" />
+                  <Cell fill="#ef4444" />
+                </Pie>
+                <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </Panel>
+          <Panel title="Open Interest Split">
+            <ResponsiveContainer width="100%" height={180}>
+              <PieChart>
+                <Pie data={[
+                  { name: 'Call OI', value: o.total_call_oi || 0 },
+                  { name: 'Put OI', value: o.total_put_oi || 0 },
+                ]} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
+                  <Cell fill="#10b981" />
+                  <Cell fill="#ef4444" />
+                </Pie>
+                <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+              </PieChart>
+            </ResponsiveContainer>
+          </Panel>
+        </div>
+      )}
 
       {/* Unusual Activity — calls */}
       {o.unusual_calls && o.unusual_calls.length > 0 && (

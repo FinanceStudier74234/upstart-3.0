@@ -1,4 +1,9 @@
 import React from 'react'
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  ReferenceLine, Cell,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -66,6 +71,50 @@ export default function QuantPanel({ analysis }) {
           </div>
         </Panel>
       </div>
+
+      {/* Factor Exposure Radar */}
+      <Panel title="Factor Exposure Radar">
+        <ResponsiveContainer width="100%" height={280}>
+          <RadarChart data={[
+            { factor: 'Market', value: Math.abs(factor.market_beta || 0) * 50 },
+            { factor: 'Size', value: Math.abs(factor.size_loading || 0) * 100 },
+            { factor: 'Value', value: Math.abs(factor.value_loading || 0) * 100 },
+            { factor: 'Momentum', value: Math.abs(factor.momentum_loading || 0) * 100 },
+            { factor: 'Quality', value: Math.abs(factor.quality_loading || 0) * 100 },
+            { factor: 'Volatility', value: Math.abs(factor.volatility_loading || 0) * 100 },
+          ]}>
+            <PolarGrid stroke="#374151" />
+            <PolarAngleAxis dataKey="factor" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 8, fill: '#6b7280' }} />
+            <Radar dataKey="value" stroke="#8b5cf6" fill="#8b5cf6" fillOpacity={0.3} strokeWidth={2} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </Panel>
+
+      {/* Factor Z-Score Bar Chart */}
+      <Panel title="Factor Z-Scores">
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={[
+            { factor: 'Momentum', z: factor.momentum_z || 0 },
+            { factor: 'Value', z: factor.value_z || 0 },
+            { factor: 'Quality', z: factor.quality_z || 0 },
+          ]}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="factor" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+            <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[-3, 3]} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+              formatter={v => [v.toFixed(3), 'Z-Score']} />
+            <ReferenceLine y={0} stroke="#6b7280" />
+            <ReferenceLine y={1.5} stroke="#f59e0b" strokeDasharray="3 3" />
+            <ReferenceLine y={-1.5} stroke="#f59e0b" strokeDasharray="3 3" />
+            <Bar dataKey="z" radius={[4, 4, 0, 0]}>
+              {[factor.momentum_z, factor.value_z, factor.quality_z].map((z, i) => (
+                <Cell key={i} fill={Math.abs(z || 0) > 1.5 ? '#f59e0b' : '#06b6d4'} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </Panel>
 
       <Panel title="Return Distribution Stats">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

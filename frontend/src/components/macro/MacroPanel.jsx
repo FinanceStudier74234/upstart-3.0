@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ReferenceLine,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -42,6 +46,47 @@ export default function MacroPanel({ analysis }) {
           </div>
         </Panel>
       </div>
+
+      {/* Yield Curve Visualization */}
+      <Panel title="Yield Curve">
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={[
+            { tenor: 'Fed Funds', yield: m.fed_funds || 0 },
+            { tenor: '2Y', yield: m.treasury_2y || 0 },
+            { tenor: '10Y', yield: m.treasury_10y || 0 },
+          ].filter(d => d.yield > 0)}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="tenor" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+            <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} tickFormatter={v => `${v}%`} domain={[0, 'auto']} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+              formatter={v => [`${v.toFixed(2)}%`, 'Yield']} />
+            <Bar dataKey="yield" radius={[4, 4, 0, 0]}
+              fill={m.yield_curve_inverted ? '#ef4444' : '#06b6d4'} />
+          </BarChart>
+        </ResponsiveContainer>
+        {m.yield_curve_inverted && (
+          <div className="text-center text-terminal-red text-[10px] mt-1 font-bold">INVERTED — Recession Signal</div>
+        )}
+      </Panel>
+
+      {/* Macro Stress Radar */}
+      <Panel title="Macro Stress Radar">
+        <ResponsiveContainer width="100%" height={250}>
+          <RadarChart data={[
+            { metric: 'VIX', value: Math.min((m.vix || 15) / 40 * 100, 100) },
+            { metric: 'HY Spread', value: Math.min((m.hy_spread || 300) / 800 * 100, 100) },
+            { metric: 'Recession P', value: m.recession_prob || 0 },
+            { metric: 'Unemployment', value: Math.min((m.unemployment || 4) / 10 * 100, 100) },
+            { metric: 'CPI', value: Math.min((m.cpi_yoy || 3) / 8 * 100, 100) },
+            { metric: 'Macro Pressure', value: m.macro_pressure_score || 0 },
+          ]}>
+            <PolarGrid stroke="#374151" />
+            <PolarAngleAxis dataKey="metric" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 8, fill: '#6b7280' }} />
+            <Radar dataKey="value" stroke="#ef4444" fill="#ef4444" fillOpacity={0.25} strokeWidth={2} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </Panel>
 
       <Panel title="UPST Sensitivity">
         <div className="grid grid-cols-2 gap-2 text-xs">

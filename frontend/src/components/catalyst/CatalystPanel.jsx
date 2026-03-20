@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  Cell,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -25,6 +29,31 @@ export default function CatalystPanel({ analysis }) {
         <Panel><Stat label="Dominant Type" value={c.dominant_catalyst_type} /></Panel>
         <Panel><Stat label="Binary Risk" value={c.binary_event_risk?.toFixed(0)} color={c.binary_event_risk > 60 ? 'text-terminal-red' : ''} /></Panel>
       </div>
+
+      {/* Catalyst Timeline Chart */}
+      {c.upcoming && c.upcoming.length > 0 && (
+        <Panel title="Catalyst Impact Timeline">
+          <ResponsiveContainer width="100%" height={180}>
+            <BarChart data={c.upcoming.slice(0, 10).map(evt => ({
+              name: (evt.name || '').slice(0, 15),
+              impact: evt.expected_impact === 'bullish' ? 1 : evt.expected_impact === 'bearish' ? -1 : 0,
+              magnitude: evt.magnitude === 'extreme' ? 3 : evt.magnitude === 'high' ? 2 : 1,
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="name" tick={{ fontSize: 8, fill: '#9ca3af' }} angle={-15} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[-3, 3]} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={(v, name) => [Math.abs(v), name === 'impact' ? 'Direction' : 'Magnitude']} />
+              <Bar dataKey="magnitude" name="Magnitude">
+                {c.upcoming.slice(0, 10).map((evt, i) => (
+                  <Cell key={i} fill={evt.expected_impact === 'bullish' ? '#10b981' :
+                    evt.expected_impact === 'bearish' ? '#ef4444' : '#f59e0b'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
 
       <Panel title="Upcoming Catalysts">
         {c.upcoming && c.upcoming.length > 0 ? (

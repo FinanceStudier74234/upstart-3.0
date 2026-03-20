@@ -1,7 +1,11 @@
-import React from 'react'
+import React, { useMemo } from 'react'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell
+} from 'recharts'
 
 export default function ExecutiveDashboard({ analysis }) {
   if (!analysis) return <div className="text-terminal-muted p-8">Loading analysis...</div>
@@ -13,6 +17,39 @@ export default function ExecutiveDashboard({ analysis }) {
 
   const priceColor = (decision.action || '').includes('buy') ? 'text-terminal-green'
     : (decision.action || '').includes('short') ? 'text-terminal-red' : 'text-terminal-text'
+
+  const invertedScores = ['macro_pressure', 'credit_stress', 'squeeze_risk', 'positioning_fragility']
+
+  const radarData = useMemo(() => {
+    if (!scores) return []
+    return Object.entries(scores).map(([k, v]) => ({
+      subject: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: v?.value != null ? Math.round(v.value) : 0,
+      fullMark: 100,
+    }))
+  }, [scores])
+
+  const barData = useMemo(() => {
+    if (!scores) return []
+    return Object.entries(scores).map(([k, v]) => {
+      const raw = v?.value != null ? Math.round(v.value) : 0
+      const isInverted = invertedScores.includes(k)
+      return {
+        name: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        score: raw,
+        fill: isInverted ? (raw > 50 ? '#ef4444' : '#10b981') : (raw >= 50 ? '#10b981' : '#ef4444'),
+      }
+    })
+  }, [scores])
+
+  const CustomTooltipStyle = {
+    backgroundColor: '#1f2937',
+    border: '1px solid #374151',
+    borderRadius: '6px',
+    color: '#d1d5db',
+    fontSize: '11px',
+    padding: '6px 10px',
+  }
 
   return (
     <div className="space-y-4">
@@ -51,10 +88,93 @@ export default function ExecutiveDashboard({ analysis }) {
               key={k}
               label={k.replace(/_/g, ' ')}
               value={v?.value}
-              inverted={['macro_pressure', 'credit_stress', 'squeeze_risk', 'positioning_fragility'].includes(k)}
+              inverted={invertedScores.includes(k)}
             />
           ))}
         </div>
+
+        {/* Charts Row */}
+        {radarData.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+            {/* Radar Chart */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <h3 className="text-xs font-bold text-gray-300 mb-2 uppercase tracking-wider">Score Radar</h3>
+              <ResponsiveContainer width="100%" height={320}>
+                <RadarChart data={radarData} cx="50%" cy="50%" outerRadius="70%">
+                  <PolarGrid stroke="#374151" />
+                  <PolarAngleAxis
+                    dataKey="subject"
+                    tick={{ fill: '#9ca3af', fontSize: 9 }}
+                  />
+                  <PolarRadiusAxis
+                    angle={90}
+                    domain={[0, 100]}
+                    tick={{ fill: '#6b7280', fontSize: 9 }}
+                    axisLine={false}
+                  />
+                  <Radar
+                    name="Score"
+                    dataKey="value"
+                    stroke="#10b981"
+                    fill="#10b981"
+                    fillOpacity={0.25}
+                  />
+                  <Tooltip
+                    contentStyle={CustomTooltipStyle}
+                    formatter={(val) => [`${val} / 100`, 'Score']}
+                  />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Bar Chart */}
+            <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+              <h3 className="text-xs font-bold text-gray-300 mb-2 uppercase tracking-wider">Metrics Comparison</h3>
+              <ResponsiveContainer width="100%" height={320}>
+                <BarChart
+                  data={barData}
+                  layout="vertical"
+                  margin={{ top: 5, right: 20, left: 10, bottom: 5 }}
+                >
+                  <XAxis
+                    type="number"
+                    domain={[0, 100]}
+                    tick={{ fill: '#9ca3af', fontSize: 10 }}
+                    axisLine={{ stroke: '#374151' }}
+                    tickLine={{ stroke: '#374151' }}
+                  />
+                  <YAxis
+                    type="category"
+                    dataKey="name"
+                    tick={{ fill: '#9ca3af', fontSize: 9 }}
+                    width={120}
+                    axisLine={{ stroke: '#374151' }}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={CustomTooltipStyle}
+                    formatter={(val) => [`${val} / 100`, 'Score']}
+                    cursor={{ fill: 'rgba(55, 65, 81, 0.4)' }}
+                  />
+                  <Legend
+                    wrapperStyle={{ fontSize: '10px', color: '#9ca3af' }}
+                  />
+                  <Bar
+                    dataKey="score"
+                    name="Score"
+                    radius={[0, 4, 4, 0]}
+                    barSize={14}
+                    isAnimationActive={true}
+                  >
+                    {barData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
       </Panel>
 
       {/* Trade Decision Panel */}

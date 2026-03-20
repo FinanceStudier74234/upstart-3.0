@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  PieChart, Pie, Cell, Legend,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -20,15 +24,24 @@ export default function OriginationPanel({ analysis }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Product Mix">
-          <div className="space-y-2 text-xs">
-            {[['Personal', o.personal_pct], ['Auto', o.auto_pct], ['HELOC', o.heloc_pct], ['Small Biz', o.small_biz_pct]].map(([name, pct]) => (
-              <div key={name} className="flex items-center gap-2">
-                <span className="w-20 text-terminal-muted">{name}</span>
-                <div className="flex-1 score-bar"><div className="score-fill bg-terminal-cyan" style={{width: `${pct || 0}%`}} /></div>
-                <span className="w-10 text-right">{pct || 0}%</span>
-              </div>
-            ))}
-          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={[
+                { name: 'Personal', value: o.personal_pct || 0 },
+                { name: 'Auto', value: o.auto_pct || 0 },
+                { name: 'HELOC', value: o.heloc_pct || 0 },
+                { name: 'Small Biz', value: o.small_biz_pct || 0 },
+              ].filter(d => d.value > 0)} cx="50%" cy="50%" innerRadius={40} outerRadius={70} paddingAngle={3} dataKey="value">
+                <Cell fill="#06b6d4" />
+                <Cell fill="#8b5cf6" />
+                <Cell fill="#10b981" />
+                <Cell fill="#f59e0b" />
+              </Pie>
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={v => [`${v}%`]} />
+              <Legend wrapperStyle={{ fontSize: 10 }} />
+            </PieChart>
+          </ResponsiveContainer>
         </Panel>
 
         <Panel title="Partners & Quality">

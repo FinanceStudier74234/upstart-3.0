@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  BarChart, Bar, ReferenceLine, Cell,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -62,16 +66,57 @@ export default function TradeDecisionPanel({ analysis }) {
 
       {prob.cone_1m && Object.keys(prob.cone_1m).length > 0 && (
         <Panel title="Probability Cones (1 Month)">
-          <div className="grid grid-cols-5 gap-2 text-xs text-center">
-            {Object.entries(prob.cone_1m).map(([k, v]) => (
-              <div key={k}>
-                <div className="text-terminal-muted text-[10px]">{k.toUpperCase()}</div>
-                <div className="font-bold">${v?.toFixed(2)}</div>
-              </div>
-            ))}
-          </div>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={Object.entries(prob.cone_1m).map(([k, v]) => ({ level: k.toUpperCase(), price: v }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="level" tick={{ fontSize: 10, fill: '#9ca3af' }} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={['auto', 'auto']}
+                tickFormatter={v => `$${v}`} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={v => [`$${v?.toFixed(2)}`, 'Price']} />
+              {d.entry_price && <ReferenceLine y={d.entry_price} stroke="#06b6d4" strokeDasharray="3 3"
+                label={{ value: 'Entry', fill: '#06b6d4', fontSize: 9 }} />}
+              <Bar dataKey="price" radius={[4, 4, 0, 0]}>
+                {Object.entries(prob.cone_1m).map(([k], i) => (
+                  <Cell key={i} fill={k.includes('p10') || k.includes('p25') ? '#ef4444' :
+                    k.includes('p75') || k.includes('p90') ? '#10b981' : '#06b6d4'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
         </Panel>
       )}
+
+      {/* Probability Bars */}
+      <Panel title="Directional Probabilities">
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={[
+            { label: 'Up 1W', prob: (prob.prob_up_1w || 0) * 100 },
+            { label: 'Up 1M', prob: (prob.prob_up_1m || 0) * 100 },
+            { label: 'Up 3M', prob: (prob.prob_up_3m || 0) * 100 },
+            { label: '>Target', prob: (prob.prob_above_target || 0) * 100 },
+            { label: '<Stop', prob: (prob.prob_below_stop || 0) * 100 },
+          ].filter(d => d.prob > 0)} layout="vertical">
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis type="number" tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[0, 100]} tickFormatter={v => `${v}%`} />
+            <YAxis type="category" dataKey="label" tick={{ fontSize: 10, fill: '#9ca3af' }} width={60} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+              formatter={v => [`${v.toFixed(1)}%`, 'Probability']} />
+            <ReferenceLine x={50} stroke="#6b7280" strokeDasharray="3 3" />
+            <Bar dataKey="prob" radius={[0, 4, 4, 0]}>
+              {[
+                { label: 'Up 1W', prob: (prob.prob_up_1w || 0) * 100 },
+                { label: 'Up 1M', prob: (prob.prob_up_1m || 0) * 100 },
+                { label: 'Up 3M', prob: (prob.prob_up_3m || 0) * 100 },
+                { label: '>Target', prob: (prob.prob_above_target || 0) * 100 },
+                { label: '<Stop', prob: (prob.prob_below_stop || 0) * 100 },
+              ].filter(d => d.prob > 0).map((d, i) => (
+                <Cell key={i} fill={d.label === '<Stop' ? '#ef4444' : d.prob >= 50 ? '#10b981' : '#f59e0b'} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </Panel>
     </div>
   )
 }

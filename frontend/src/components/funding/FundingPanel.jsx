@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  Cell,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -50,6 +54,30 @@ export default function FundingPanel({ analysis }) {
           </table>
         </div>
       </Panel>
+
+      {/* Facility Maturity Waterfall */}
+      {(f.facilities || []).length > 0 && (
+        <Panel title="Facility Maturity Waterfall">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={(f.facilities || []).map(fac => ({
+              name: fac.name?.slice(0, 12) || 'Unknown',
+              months: fac.months_to_maturity || 0,
+              committed: fac.committed_amount || 0,
+            }))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+              <XAxis dataKey="name" tick={{ fontSize: 8, fill: '#9ca3af' }} angle={-15} />
+              <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} label={{ value: 'Months', angle: -90, position: 'insideLeft', fontSize: 9, fill: '#9ca3af' }} />
+              <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+                formatter={(v, name) => [name === 'months' ? `${v} months` : `$${v}M`, name === 'months' ? 'To Maturity' : 'Committed']} />
+              <Bar dataKey="months" name="months" radius={[4, 4, 0, 0]}>
+                {(f.facilities || []).map((fac, i) => (
+                  <Cell key={i} fill={fac.months_to_maturity <= 6 ? '#ef4444' : fac.months_to_maturity <= 12 ? '#f59e0b' : '#10b981'} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Concentration Risk">

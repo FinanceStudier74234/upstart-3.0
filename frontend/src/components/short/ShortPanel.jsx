@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -34,6 +38,44 @@ export default function ShortPanel({ analysis }) {
         <Panel><Stat label="Crowding Change" value={s.crowding_change || '--'} /></Panel>
         <Panel><Stat label="Borrow Trend" value={s.borrow_fee_trend || '--'} /></Panel>
       </div>
+
+      {/* Short Metrics Radar */}
+      <Panel title="Short Risk Profile">
+        <ResponsiveContainer width="100%" height={250}>
+          <RadarChart data={[
+            { metric: 'SI % Float', value: Math.min((s.short_pct_float || 0) / 30 * 100, 100) },
+            { metric: 'Days Cover', value: Math.min((s.days_to_cover || 0) / 10 * 100, 100) },
+            { metric: 'CTB', value: Math.min((s.cost_to_borrow || 0) / 50 * 100, 100) },
+            { metric: 'Utilization', value: s.utilization || 0 },
+            { metric: 'Crowding', value: s.crowding_score || 0 },
+            { metric: 'Squeeze Risk', value: s.squeeze_risk_score || 0 },
+          ]}>
+            <PolarGrid stroke="#374151" />
+            <PolarAngleAxis dataKey="metric" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 8, fill: '#6b7280' }} />
+            <Radar dataKey="value" stroke="#ef4444" fill="#ef4444" fillOpacity={0.25} strokeWidth={2} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </Panel>
+
+      {/* Short Scores Bar Chart */}
+      <Panel title="Short Analysis Scores">
+        <ResponsiveContainer width="100%" height={180}>
+          <BarChart data={[
+            { label: 'Opportunity', score: s.short_opportunity_score || 0 },
+            { label: 'Crowdedness', score: s.positioning_crowdedness_score || 0 },
+            { label: 'Bearish Struct', score: s.bearish_structure_score || 0 },
+            { label: 'Feasibility', score: s.direct_short_feasibility_score || 0 },
+          ]}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+            <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+            <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} domain={[0, 100]} />
+            <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 11 }}
+              formatter={v => [`${v.toFixed(0)}/100`, 'Score']} />
+            <Bar dataKey="score" fill="#ef4444" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Panel>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Squeeze Risk">

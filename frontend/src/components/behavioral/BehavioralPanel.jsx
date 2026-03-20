@@ -1,4 +1,8 @@
 import React from 'react'
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ResponsiveContainer,
+} from 'recharts'
 import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
@@ -63,6 +67,27 @@ export default function BehavioralPanel({ analysis }) {
         <Panel><Stat label="Crowd Shift" value={b.crowd_psychology_shift || 'None'} /></Panel>
         <Panel><Stat label="Noise Level" value={b.noise_level?.toFixed(2)} /></Panel>
       </div>
+
+      {/* Behavioral Signals Radar */}
+      <Panel title="Behavioral Signal Radar">
+        <ResponsiveContainer width="100%" height={250}>
+          <RadarChart data={[
+            { signal: 'Panic', value: b.panic_selling ? 100 : 0 },
+            { signal: 'Euphoria', value: b.euphoric_buying ? 100 : 0 },
+            { signal: 'Trapped Long', value: b.trapped_longs ? 80 : 0 },
+            { signal: 'Trapped Short', value: b.trapped_shorts ? 80 : 0 },
+            { signal: 'Buy Exhaust', value: b.buying_exhaustion ? 70 : 0 },
+            { signal: 'Sell Exhaust', value: b.selling_exhaustion ? 70 : 0 },
+            { signal: 'Long Capit.', value: b.long_capitulation ? 90 : 0 },
+            { signal: 'Short Capit.', value: b.short_capitulation ? 90 : 0 },
+          ]}>
+            <PolarGrid stroke="#374151" />
+            <PolarAngleAxis dataKey="signal" tick={{ fontSize: 8, fill: '#9ca3af' }} />
+            <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} />
+            <Radar dataKey="value" stroke="#ef4444" fill="#ef4444" fillOpacity={0.3} strokeWidth={2} />
+          </RadarChart>
+        </ResponsiveContainer>
+      </Panel>
 
       {b.dominant_signals && b.dominant_signals.length > 0 && (
         <Panel title="Dominant Signals">
