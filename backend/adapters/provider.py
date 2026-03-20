@@ -9,8 +9,17 @@ from backend.adapters.base import (
     BaseMarketAdapter, BaseMacroAdapter, BaseShortAdapter,
     BaseNewsAdapter, BaseFundamentalAdapter, DataEnvelope,
 )
-from backend.adapters.yahoo_adapter import YahooMarketAdapter, YahooFundamentalAdapter
-from backend.adapters.fred_adapter import FREDAdapter
+try:
+    from backend.adapters.yahoo_adapter import YahooMarketAdapter, YahooFundamentalAdapter
+except ImportError:
+    YahooMarketAdapter = None
+    YahooFundamentalAdapter = None
+
+try:
+    from backend.adapters.fred_adapter import FREDAdapter
+except ImportError:
+    FREDAdapter = None
+
 from backend.adapters.mock_adapter import (
     MockMarketAdapter, MockMacroAdapter, MockShortAdapter,
     MockNewsAdapter, MockFundamentalAdapter,
@@ -31,28 +40,25 @@ class DataProvider:
 
         # Market data chain: Polygon → Yahoo → Mock
         self._market_adapters: list[BaseMarketAdapter] = []
-        if not self._mock_mode:
-            # TODO: Add PolygonAdapter when polygon_api_key is configured
+        if not self._mock_mode and YahooMarketAdapter is not None:
             self._market_adapters.append(YahooMarketAdapter())
         self._market_adapters.append(MockMarketAdapter())
 
         # Macro chain: FRED → Mock
         self._macro_adapters: list[BaseMacroAdapter] = []
-        if not self._mock_mode and settings.has_fred():
+        if not self._mock_mode and FREDAdapter is not None and settings.has_fred():
             self._macro_adapters.append(FREDAdapter())
         self._macro_adapters.append(MockMacroAdapter())
 
         # Short chain: ORTEX → Fintel → Mock
-        # TODO: Add OrtexAdapter, FintelAdapter
         self._short_adapters: list[BaseShortAdapter] = [MockShortAdapter()]
 
         # News chain: Finnhub → NewsAPI → Mock
-        # TODO: Add FinnhubAdapter, NewsAPIAdapter
         self._news_adapters: list[BaseNewsAdapter] = [MockNewsAdapter()]
 
         # Fundamentals chain: Yahoo → Mock
         self._fundamental_adapters: list[BaseFundamentalAdapter] = []
-        if not self._mock_mode:
+        if not self._mock_mode and YahooFundamentalAdapter is not None:
             self._fundamental_adapters.append(YahooFundamentalAdapter())
         self._fundamental_adapters.append(MockFundamentalAdapter())
 

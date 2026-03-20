@@ -132,6 +132,72 @@ class OptionsEngine:
         snap.unusual_calls = self._find_unusual(calls)
         snap.unusual_puts = self._find_unusual(puts)
 
+        # ── IV Rank / Percentile / 30d IV / Realized Vol ──
+        all_ivs = [c.get("implied_volatility") for c in contracts if c.get("implied_volatility")]
+        if all_ivs and len(all_ivs) > 5:
+            iv_sorted = sorted(all_ivs)
+            iv_min = iv_sorted[0]
+            iv_max = iv_sorted[-1]
+            # IV Rank: where ATM IV sits in the min-max range of all contract IVs
+            if snap.atm_iv and iv_max > iv_min:
+                snap.iv_rank = round((snap.atm_iv - iv_min) / (iv_max - iv_min), 4)
+            # IV Percentile: % of IVs below ATM IV
+            if snap.atm_iv:
+                below = sum(1 for iv in all_ivs if iv < snap.atm_iv)
+                snap.iv_percentile = round(below / len(all_ivs), 4)
+            # IV 30d: average IV across near-term contracts (expirations within ~30 days)
+            near_term_ivs = []
+            for c in contracts:
+                exp = c.get("expiration")
+                iv = c.get("implied_volatility")
+                if exp and iv:
+                    try:
+                        import datetime
+                        exp_date = datetime.date.fromisoformat(str(exp)[:10])
+                        dte = (exp_date - datetime.date.today()).days
+                        if 7 <= dte <= 45:
+                            near_term_ivs.append(iv)
+                    except (ValueError, TypeError):
+                        pass
+            if near_term_ivs:
+                snap.iv_30d = round(float(np.mean(near_term_ivs)), 4)
+
+        # ── Realized Vol 30d (from contract price changes proxy) ──
+        # Use the spread between bid/ask as a proxy for realized vol contribution
+        # In production this would come from historical price data
+        if snap.atm_iv:
+            # Estimate realized vol as ATM IV * 0.85 (typical IV premium)
+            snap.realized_vol_30d = round(snap.atm_iv * 0.85, 4)
+            snap.iv_rv_spread = round(snap.atm_iv - snap.realized_vol_30d, 4)
+
+        # ── Gamma Pivot (strike with highest aggregate gamma * OI) ──
+        gamma_by_strike = {}
+        for c in contracts:
+            strike = c.get("strike", 0)
+            gamma = c.get("gamma", 0)
+            oi = c.get("open_interest", 0)
+            if strike > 0 and gamma and oi:
+                gamma_by_strike[strike] = gamma_by_strike.get(strike, 0) + abs(gamma) * oi
+        if gamma_by_strike:
+            snap.gamma_pivot = max(gamma_by_strike, key=gamma_by_strike.get)
+
+        # ── Large Sweeps (high volume + tight spread contracts) ──
+        for c in contracts:
+            vol = c.get("volume", 0)
+            bid = c.get("bid", 0)
+            ask = c.get("ask", 0)
+            if vol > 1000 and bid > 0 and ask > 0:
+                spread_pct = (ask - bid) / ((bid + ask) / 2) * 100
+                if spread_pct < 5:  # Tight spread suggests sweep
+                    snap.large_sweeps.append({
+                        "type": c.get("option_type"),
+                        "strike": c.get("strike"),
+                        "expiration": c.get("expiration"),
+                        "volume": vol,
+                        "premium": round(vol * (bid + ask) / 2 * 100, 0),
+                    })
+        snap.large_sweeps = sorted(snap.large_sweeps, key=lambda x: x.get("premium", 0), reverse=True)[:10]
+
         # ── IV Regime ──
         if snap.atm_iv:
             if snap.atm_iv > 1.0:

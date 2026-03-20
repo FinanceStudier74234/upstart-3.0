@@ -86,6 +86,19 @@ class MacroEngine:
             elif snap.vix < 15:
                 snap.risk_regime = "risk_on"
 
+        # Liquidity regime
+        if snap.financial_conditions is not None:
+            if snap.financial_conditions < -0.5:
+                snap.liquidity_regime = "tight"
+            elif snap.financial_conditions > 0.5:
+                snap.liquidity_regime = "ample"
+        elif snap.hy_spread is not None and snap.vix is not None:
+            # Proxy: tight liquidity = wide spreads + high VIX
+            if snap.hy_spread > 500 and snap.vix > 25:
+                snap.liquidity_regime = "tight"
+            elif snap.hy_spread < 300 and snap.vix < 18:
+                snap.liquidity_regime = "ample"
+
         # Macro stress
         stress_count = 0
         if snap.rate_regime == "tightening": stress_count += 1

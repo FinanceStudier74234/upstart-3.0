@@ -161,8 +161,33 @@ export default function ExecutiveDashboard({ analysis }) {
         </div>
       </Panel>
 
-      {/* Data Quality */}
-      <div className="flex gap-2 text-[10px] text-terminal-muted px-1">
+      {/* Data Governance */}
+      {analysis.data_governance && (
+        <Panel title="Data Governance">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-2">
+            <Stat label="Quality Score" value={analysis.data_governance.overall_quality_score?.toFixed(0)} />
+            <Stat label="Freshness" value={`${analysis.data_governance.overall_freshness_score?.toFixed(0)}%`} />
+            <Stat label="Coverage" value={`${analysis.data_governance.overall_coverage_pct?.toFixed(0)}%`} />
+            <Stat label="Snooping Risk" value={analysis.data_governance.data_snooping_risk?.toFixed(0)}
+              color={analysis.data_governance.data_snooping_risk > 50 ? 'text-terminal-red' : ''} />
+          </div>
+          {analysis.data_governance.stale_sources?.length > 0 && (
+            <div className="text-[10px] text-terminal-amber mt-1">
+              Stale: {analysis.data_governance.stale_sources.join(', ')}
+            </div>
+          )}
+          {analysis.data_governance.recommendations?.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {analysis.data_governance.recommendations.slice(0, 3).map((r, i) => (
+                <div key={i} className="text-[10px] text-terminal-muted">• {r}</div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {/* Data Sources */}
+      <div className="flex flex-wrap gap-2 text-[10px] text-terminal-muted px-1">
         {analysis.data_sources && Object.entries(analysis.data_sources).map(([k, v]) => (
           <span key={k} className="bg-terminal-panel px-2 py-0.5 rounded">{k}: {v}</span>
         ))}

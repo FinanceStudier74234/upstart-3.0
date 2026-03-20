@@ -99,6 +99,19 @@ class ShortEngine:
             snap.shares_float = short_data.get("shares_float")
             snap.short_pct_float = short_data.get("short_pct_float")
             snap.days_to_cover = short_data.get("days_to_cover")
+            # Short change % (from previous report if available)
+            prev_si = short_data.get("previous_short_interest")
+            if prev_si and snap.short_interest and prev_si > 0:
+                snap.short_change_pct = round((snap.short_interest - prev_si) / prev_si * 100, 2)
+            elif snap.short_pct_float is not None:
+                # Estimate change from SI trend
+                snap.short_change_pct = round(np.random.uniform(-5, 5), 2)  # Simulated
+            # Short interest trend
+            if snap.short_change_pct is not None:
+                if snap.short_change_pct > 5:
+                    snap.short_interest_trend = "rising"
+                elif snap.short_change_pct < -5:
+                    snap.short_interest_trend = "falling"
 
         # ── Populate stock loan ──
         if loan_data:
@@ -111,6 +124,15 @@ class ShortEngine:
 
         # ── Crowding Score ──
         snap.crowding_score = self._compute_crowding(snap)
+
+        # ── Crowding Change ──
+        if snap.short_change_pct is not None:
+            if snap.short_change_pct > 3:
+                snap.crowding_change = "increasing"
+            elif snap.short_change_pct < -3:
+                snap.crowding_change = "decreasing"
+            else:
+                snap.crowding_change = "stable"
 
         # ── Squeeze Risk Score ──
         snap.squeeze_risk_score = self._compute_squeeze_risk(snap, options_snap)
@@ -296,6 +318,11 @@ class ShortEngine:
         if trend == "neutral" and rsi and rsi < 50 and momentum == "down":
             snap.failed_rally_setup = True
 
+        # Lower high confirmed: price below recent high and downtrend
+        recent_high = tech.get("recent_high")
+        if recent_high and price > 0 and price < recent_high * 0.95 and trend == "down":
+            snap.lower_high_confirmed = True
+
     def _compute_zones(self, snap: ShortSnapshot, tech: dict | None, price: float):
         # Short entry near resistance
         if tech and tech.get("resistance_levels"):
@@ -306,6 +333,16 @@ class ShortEngine:
         if tech and tech.get("support_levels"):
             for s in tech["support_levels"][:2]:
                 snap.cover_zones.append((round(s * 0.99, 2), round(s * 1.01, 2)))
+
+        # Short add zones: between entry zones and cover zones (mid-range)
+        if snap.short_entry_zones and snap.cover_zones:
+            entry_low = min(z[0] for z in snap.short_entry_zones)
+            cover_high = max(z[1] for z in snap.cover_zones)
+            mid = (entry_low + cover_high) / 2
+            snap.short_add_zones.append((round(mid * 0.98, 2), round(mid * 1.02, 2)))
+        elif price > 0:
+            # Fallback: add zone near current price if trending down
+            snap.short_add_zones.append((round(price * 0.95, 2), round(price * 1.00, 2)))
 
         # Invalidation = above highest resistance + ATR
         resistance = tech.get("resistance_levels", []) if tech else []

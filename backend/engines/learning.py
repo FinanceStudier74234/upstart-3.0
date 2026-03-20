@@ -108,6 +108,18 @@ class LearningEngine:
         if directions:
             perf.direction_accuracy = round(sum(directions) / len(directions), 4)
 
+        # Brier score: mean squared error of directional probability forecasts
+        # Treat direction_correct as binary outcome, predicted probability as 0.5 + normalized predicted value
+        brier_pairs = []
+        for p in validated:
+            if p.direction_correct is not None:
+                # Clamp predicted probability to [0, 1]
+                forecast_prob = max(0.0, min(1.0, 0.5 + p.predicted_value * 0.01))
+                outcome = 1.0 if p.direction_correct else 0.0
+                brier_pairs.append((forecast_prob - outcome) ** 2)
+        if brier_pairs:
+            perf.brier_score = round(sum(brier_pairs) / len(brier_pairs), 4)
+
         # Adjust weight based on performance
         if perf.direction_accuracy is not None:
             if perf.direction_accuracy > 0.55:

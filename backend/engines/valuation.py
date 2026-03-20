@@ -90,6 +90,17 @@ class ValuationEngine:
             rng = ps_max - ps_min
             snap.ps_percentile = round((snap.price_to_sales - ps_min) / rng * 100, 1) if rng > 0 else 50.0
 
+        # EV/Revenue percentile (vs 3-year range)
+        if snap.ev_revenue is not None:
+            ev_rev_min = fundamentals.get("ev_rev_min_3y", 3.0)
+            ev_rev_max = fundamentals.get("ev_rev_max_3y", 12.0)
+            rng = ev_rev_max - ev_rev_min
+            if rng > 0:
+                snap.ev_rev_percentile = round(
+                    (snap.ev_revenue - ev_rev_min) / rng * 100, 1)
+            else:
+                snap.ev_rev_percentile = 50.0
+
         # Growth-adjusted
         snap.growth_rate = round(growth * 100, 1)
         if snap.price_to_sales and growth > 0:

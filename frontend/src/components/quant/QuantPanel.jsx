@@ -21,8 +21,10 @@ export default function QuantPanel({ analysis }) {
           <div><span className="text-terminal-muted">R²:</span> {spy.pct_market_driven?.toFixed(1)}%</div>
           <div><span className="text-terminal-muted">Upside Capture:</span> {spy.upside_capture?.toFixed(1)}%</div>
           <div><span className="text-terminal-muted">Downside Capture:</span> {spy.downside_capture?.toFixed(1)}%</div>
-          <div><span className="text-terminal-muted">Rolling Beta (21d):</span> {spy.rolling_beta_21?.toFixed(3)}</div>
-          <div><span className="text-terminal-muted">Rolling Beta (63d):</span> {spy.rolling_beta_63?.toFixed(3)}</div>
+          <div><span className="text-terminal-muted">Rolling Beta (latest):</span> {spy.rolling_beta_latest?.toFixed(3)}</div>
+          <div><span className="text-terminal-muted">Rolling Corr (latest):</span> {spy.rolling_corr_latest?.toFixed(3)}</div>
+          <div><span className="text-terminal-muted">Beta Mean:</span> {spy.rolling_beta_mean?.toFixed(3)}</div>
+          <div><span className="text-terminal-muted">Beta Std:</span> {spy.rolling_beta_std?.toFixed(3)}</div>
           <div><span className="text-terminal-muted">Regime:</span> {spy.regime}</div>
           <div><span className="text-terminal-muted">Ratio Trend:</span> {spy.ratio_trend}</div>
           <div><span className="text-terminal-muted">UPST DD:</span> {spy.upst_drawdown_current?.toFixed(1)}%</div>

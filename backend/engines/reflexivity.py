@@ -87,6 +87,17 @@ class ReflexivityEngine:
             from scipy import stats as sp_stats
             snap.tail_thickness = round(float(sp_stats.kurtosis(returns)), 2)
 
+        # Perception-reality gap: measures divergence between narrative (price momentum)
+        # and fundamentals (mean-reversion tendency)
+        if returns is not None and len(returns) > 60:
+            # Short-term momentum (narrative / perception)
+            recent_cum = float(np.sum(returns[-21:]))  # 1-month cumulative return
+            # Long-term mean reversion signal (reality / fundamentals)
+            long_cum = float(np.mean(returns[-63:]))  # 3-month avg daily return
+            # Gap: when short-term deviates significantly from long-term tendency
+            snap.perception_reality_gap = round(
+                (recent_cum - long_cum * 21) / max(float(np.std(returns)) * np.sqrt(21), 0.01), 2)
+
         # Reflexivity score
         snap.reflexivity_score = self._compute_reflexivity_score(snap)
 

@@ -8,8 +8,16 @@ from backend.adapters.base import (
     BaseNewsAdapter,
     BaseFundamentalAdapter,
 )
-from backend.adapters.yahoo_adapter import YahooMarketAdapter, YahooFundamentalAdapter
-from backend.adapters.fred_adapter import FREDAdapter
+try:
+    from backend.adapters.yahoo_adapter import YahooMarketAdapter, YahooFundamentalAdapter
+except ImportError:
+    YahooMarketAdapter = None  # type: ignore[assignment,misc]
+    YahooFundamentalAdapter = None  # type: ignore[assignment,misc]
+
+try:
+    from backend.adapters.fred_adapter import FREDAdapter
+except ImportError:
+    FREDAdapter = None  # type: ignore[assignment,misc]
 from backend.adapters.mock_adapter import (
     MockMarketAdapter,
     MockMacroAdapter,

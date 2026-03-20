@@ -160,8 +160,20 @@ class Orchestrator:
         financials_env = await data_provider.get_financials("UPST")
         earnings_env = await data_provider.get_earnings("UPST")
 
-        # Fetch macro indicators
-        macro_env = await data_provider.get_macro("FED_FUNDS")
+        # Fetch macro indicators (multiple series)
+        macro_indicators = ["FED_FUNDS", "TREASURY_2Y", "TREASURY_10Y", "CPI_YOY",
+                            "UNEMPLOYMENT", "HY_SPREAD", "IG_SPREAD", "VIX",
+                            "RECESSION_PROB", "CONSUMER_DELINQUENCY", "LENDING_STANDARDS",
+                            "PCE_YOY", "INITIAL_CLAIMS", "FINANCIAL_CONDITIONS"]
+        macro_latest = {}
+        macro_env = None
+        for ind in macro_indicators:
+            env = await data_provider.get_macro(ind)
+            if macro_env is None:
+                macro_env = env  # Use first for source tracking
+            if env.data and isinstance(env.data, list) and len(env.data) > 0:
+                # Get latest value from the time series
+                macro_latest[ind.lower()] = env.data[0].get("value", 0)
 
         # Track data sources
         analysis.data_sources = {
@@ -220,10 +232,34 @@ class Orchestrator:
             spy_returns = spy_df["close"].pct_change().dropna().values
 
         # ── 6. New Engines ──
-        # Valuation (pass fundamentals data if available)
+        # Valuation (transform quarterly data into expected dict format)
+        fundamentals_dict = None
+        if financials_env.data and isinstance(financials_env.data, list) and len(financials_env.data) > 0:
+            latest_q = financials_env.data[0]
+            # Build TTM (trailing twelve months) from up to 4 quarters
+            quarters = financials_env.data[:4]
+            ttm_revenue = sum(q.get("revenue", 0) for q in quarters)
+            ttm_ebitda = sum(q.get("adjusted_ebitda", 0) or q.get("ebitda", 0) for q in quarters)
+            fundamentals_dict = {
+                "revenue_ttm": ttm_revenue,
+                "ebitda_ttm": ttm_ebitda,
+                "net_income_ttm": sum(q.get("eps_diluted", 0) * q.get("shares_outstanding", 85e6) for q in quarters),
+                "fcf_ttm": int(ttm_ebitda * 0.6),  # Estimate FCF as 60% of EBITDA
+                "shares_outstanding": latest_q.get("shares_outstanding", 85_000_000),
+                "book_value": int(latest_q.get("cash_and_equivalents", 800e6)),
+                "net_debt": int(latest_q.get("total_debt", 1000e6) - latest_q.get("cash_and_equivalents", 800e6)),
+                "revenue_growth_yoy": 0.25,  # Default; would calculate from 4Q ago
+            }
+            # Calculate YoY growth if we have enough data
+            if len(financials_env.data) >= 5:
+                prior_4q = financials_env.data[4:8]
+                prior_rev = sum(q.get("revenue", 0) for q in prior_4q)
+                if prior_rev > 0:
+                    fundamentals_dict["revenue_growth_yoy"] = round((ttm_revenue - prior_rev) / prior_rev, 4)
+
         val_snap = self._safe_engine_call(
             "valuation", self.valuation_engine.analyze,
-            price=analysis.price, fundamentals=financials_env.data)
+            price=analysis.price, fundamentals=fundamentals_dict)
         if val_snap:
             analysis.valuation = self._snapshot_to_dict(val_snap)
 
@@ -237,9 +273,8 @@ class Orchestrator:
         if orig_snap:
             analysis.origination = self._snapshot_to_dict(orig_snap)
 
-        # Macro (pass adapter data)
-        macro_data = macro_env.data if macro_env.data else {}
-        macro_snap = self._safe_engine_call("macro", self.macro_engine.analyze, macro_data)
+        # Macro (pass transformed indicator dict)
+        macro_snap = self._safe_engine_call("macro", self.macro_engine.analyze, macro_latest)
         if macro_snap:
             analysis.macro = self._snapshot_to_dict(macro_snap)
 
@@ -293,9 +328,22 @@ class Orchestrator:
         if behav_snap:
             analysis.behavioral = self._snapshot_to_dict(behav_snap)
 
-        # News (pass adapter data)
+        # News (transform adapter data to engine format)
+        news_items = None
+        if news_env.data and isinstance(news_env.data, list):
+            news_items = []
+            for item in news_env.data:
+                news_items.append({
+                    "headline": item.get("headline", ""),
+                    "source": item.get("source_name", item.get("source", "unknown")),
+                    "published": item.get("published_at", item.get("published", "")),
+                    "sentiment": item.get("sentiment_score", item.get("sentiment", 0.0)),
+                    "relevance": item.get("relevance_score", item.get("relevance", 0.5)),
+                    "category": item.get("category", "general"),
+                    "flags": item.get("flags", {}),
+                })
         news_snap = self._safe_engine_call(
-            "news", self.news_engine.analyze, news_data=news_env.data)
+            "news", self.news_engine.analyze, news_data=news_items)
         if news_snap:
             analysis.news = self._snapshot_to_dict(news_snap)
 
@@ -485,11 +533,16 @@ class Orchestrator:
                 if isinstance(v, type(None)):
                     result[k] = None
                 elif hasattr(v, 'tolist'):
-                    # Preserve small arrays (probability cones, paths, etc.)
-                    arr = v.tolist() if hasattr(v, 'tolist') else v
-                    if isinstance(arr, list) and len(arr) <= 500:
+                    # Convert numpy types to Python natives
+                    arr = v.tolist()
+                    if isinstance(arr, list):
+                        # Preserve small arrays (probability cones, paths, etc.)
+                        if len(arr) <= 500:
+                            result[k] = arr
+                        # Skip very large arrays to keep response size manageable
+                    else:
+                        # Scalar numpy values (np.float64, np.int64, etc.)
                         result[k] = arr
-                    # Skip very large arrays to keep response size manageable
                 else:
                     result[k] = v
             return result

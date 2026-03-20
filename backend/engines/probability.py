@@ -108,6 +108,22 @@ class ProbabilityEngine:
 
         snap.overall_confidence = self._confidence(returns)
 
+        # Brier score: calibration metric based on directional probabilities
+        # Brier = mean( (forecast_prob - outcome)^2 ) over recent data
+        # Use a proxy: compare our 1-week directional prob vs realized outcomes
+        if len(returns) >= 10:
+            recent_weeks = [returns[i:i+5] for i in range(max(0, len(returns)-50), len(returns)-5, 5)]
+            if recent_weeks:
+                brier_sum = 0.0
+                count = 0
+                for week_rets in recent_weeks:
+                    actual_up = 1.0 if float(np.sum(week_rets)) > 0 else 0.0
+                    forecast_prob = snap.prob_up_1w or 0.5
+                    brier_sum += (forecast_prob - actual_up) ** 2
+                    count += 1
+                if count > 0:
+                    snap.brier_score = round(brier_sum / count, 4)
+
         return snap
 
     def _prob_positive(self, mu: float, sigma: float, days: int) -> float:

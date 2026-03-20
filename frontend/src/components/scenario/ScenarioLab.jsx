@@ -5,17 +5,30 @@ import useStore from '../../stores/useStore'
 
 const SLIDERS = [
   { key: 'spy_return_pct', label: 'SPY Return %', min: -30, max: 30, step: 1 },
+  { key: 'spy_drawdown_pct', label: 'SPY Drawdown %', min: -40, max: 0, step: 1 },
+  { key: 'beta_override', label: 'Beta Override', min: 0.5, max: 4.0, step: 0.1 },
+  { key: 'correlation_override', label: 'Correlation Override', min: -1, max: 1, step: 0.1 },
   { key: 'fed_funds_change_bps', label: 'Fed Funds Chg (bps)', min: -200, max: 200, step: 25 },
+  { key: 'treasury_2y_change_bps', label: '2Y Yield Chg (bps)', min: -200, max: 200, step: 25 },
   { key: 'treasury_10y_change_bps', label: '10Y Yield Chg (bps)', min: -200, max: 200, step: 25 },
+  { key: 'inflation_change_pct', label: 'Inflation Change %', min: -3, max: 3, step: 0.25 },
+  { key: 'unemployment_change_pct', label: 'Unemployment Chg %', min: -3, max: 5, step: 0.5 },
+  { key: 'recession_prob_change_pct', label: 'Recession Prob Chg %', min: -30, max: 50, step: 5 },
   { key: 'origination_growth_change_pct', label: 'Origination Growth %', min: -50, max: 50, step: 5 },
   { key: 'funding_capacity_change_pct', label: 'Funding Capacity %', min: -75, max: 50, step: 5 },
+  { key: 'funding_expiry_months_change', label: 'Funding Expiry (mo)', min: -12, max: 12, step: 1 },
+  { key: 'ebitda_margin_change_pct', label: 'EBITDA Margin Chg %', min: -20, max: 20, step: 2 },
   { key: 'valuation_multiple_change_pct', label: 'Valuation Multiple %', min: -50, max: 50, step: 5 },
+  { key: 'peer_valuation_change_pct', label: 'Peer Valuation %', min: -40, max: 40, step: 5 },
   { key: 'iv_change_pct', label: 'IV Change %', min: -50, max: 100, step: 5 },
-  { key: 'squeeze_risk_change_pct', label: 'Squeeze Risk Change %', min: -30, max: 50, step: 5 },
+  { key: 'short_interest_change_pct', label: 'Short Interest Chg %', min: -30, max: 50, step: 5 },
+  { key: 'squeeze_risk_change_pct', label: 'Squeeze Risk Chg %', min: -30, max: 50, step: 5 },
   { key: 'macro_stress_shock', label: 'Macro Stress (0-1)', min: 0, max: 1, step: 0.1 },
   { key: 'credit_deterioration_shock', label: 'Credit Stress (0-1)', min: 0, max: 1, step: 0.1 },
+  { key: 'market_drawdown_pct', label: 'Market Drawdown %', min: -50, max: 0, step: 5 },
   { key: 'world_risk_shock', label: 'World Risk (0-1)', min: 0, max: 1, step: 0.1 },
   { key: 'news_sentiment_shock', label: 'News Sentiment (-1 to 1)', min: -1, max: 1, step: 0.1 },
+  { key: 'options_flow_shock', label: 'Options Flow (-1 to 1)', min: -1, max: 1, step: 0.1 },
 ]
 
 export default function ScenarioLab() {

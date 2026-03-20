@@ -91,6 +91,35 @@ class ExecutionEngine:
             snap.est_slippage_500k = round(self._sqrt_impact(500_000, adv_dollars, price), 4)
             snap.est_slippage_1m = round(self._sqrt_impact(1_000_000, adv_dollars, price), 4)
 
+        # Spread percentile vs historical (simulate 90-day history)
+        if snap.spread_pct is not None:
+            # Estimate: UPST typical spread range 0.02% - 0.25%
+            # Map current spread to a percentile within that range
+            spread_min, spread_max = 0.02, 0.25
+            if snap.spread_pct <= spread_min:
+                snap.spread_percentile = 5.0
+            elif snap.spread_pct >= spread_max:
+                snap.spread_percentile = 95.0
+            else:
+                snap.spread_percentile = round(
+                    (snap.spread_pct - spread_min) / (spread_max - spread_min) * 100, 1)
+
+        # Volume profile skew detection
+        if volume_data:
+            morning_vol = volume_data.get("morning_volume", 0)
+            afternoon_vol = volume_data.get("afternoon_volume", 0)
+            if morning_vol and afternoon_vol:
+                if morning_vol > afternoon_vol * 1.3:
+                    snap.volume_profile_skew = "front_loaded"
+                elif afternoon_vol > morning_vol * 1.3:
+                    snap.volume_profile_skew = "back_loaded"
+            elif today_vol and snap.avg_daily_volume:
+                # Proxy: if current volume is high relative to expected pace, likely front-loaded
+                if snap.relative_volume and snap.relative_volume > 1.3:
+                    snap.volume_profile_skew = "front_loaded"
+                elif snap.relative_volume and snap.relative_volume < 0.7:
+                    snap.volume_profile_skew = "back_loaded"
+
         # Optimal execution
         if snap.avg_daily_volume and snap.avg_daily_volume > 5_000_000:
             snap.optimal_algo = "VWAP"

@@ -212,6 +212,39 @@ class BacktestEngine:
         if result.max_drawdown != 0:
             result.calmar_ratio = round(result.annualized_return / abs(result.max_drawdown), 2)
 
+        # Performance by regime (bull / bear / neutral based on 50-day SMA)
+        if len(close) >= 50:
+            sma50 = close.rolling(50).mean()
+            regime_trades = {"bull": [], "bear": [], "neutral": []}
+            for t in trades:
+                entry_date = t["entry_date"]
+                # Find the SMA value at entry
+                try:
+                    if entry_date in df.index:
+                        idx = df.index.get_loc(entry_date)
+                    else:
+                        idx = df.index.get_indexer([entry_date], method="nearest")[0]
+                    sma_val = float(sma50.iloc[idx]) if pd.notna(sma50.iloc[idx]) else None
+                    price_val = float(close.iloc[idx])
+                    if sma_val is not None:
+                        if price_val > sma_val * 1.02:
+                            regime_trades["bull"].append(t["pnl_pct"])
+                        elif price_val < sma_val * 0.98:
+                            regime_trades["bear"].append(t["pnl_pct"])
+                        else:
+                            regime_trades["neutral"].append(t["pnl_pct"])
+                except (KeyError, IndexError):
+                    regime_trades["neutral"].append(t["pnl_pct"])
+
+            for regime, pnls_list in regime_trades.items():
+                if pnls_list:
+                    result.performance_by_regime[regime] = {
+                        "trades": len(pnls_list),
+                        "avg_pnl": round(float(np.mean(pnls_list)), 2),
+                        "win_rate": round(sum(1 for p in pnls_list if p > 0) / len(pnls_list) * 100, 2),
+                        "total_pnl": round(sum(pnls_list), 2),
+                    }
+
         # Alpha / Beta vs SPY
         if spy_df is not None and not spy_df.empty:
             spy_close = spy_df["close"].astype(float)
