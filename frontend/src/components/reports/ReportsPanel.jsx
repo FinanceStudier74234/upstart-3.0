@@ -8,44 +8,40 @@ export default function ReportsPanel({ analysis }) {
   const [alerts, setAlerts] = useState([])
   const dg = analysis?.data_governance || {}
 
+  const [exportError, setExportError] = useState(null)
+
   useEffect(() => {
     api.alerts().then(r => setAlerts(r.alerts || [])).catch(() => {})
-  }, [analysis])
+  }, [])
 
-  const exportCsv = async () => {
-    const blob = await api.exportCsv()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'upst_analysis.csv'; a.click()
-    URL.revokeObjectURL(url)
+  const downloadBlob = async (fetchFn, filename) => {
+    setExportError(null)
+    try {
+      const blob = await fetchFn()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = filename; a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(`Export failed: ${e.message}`)
+    }
   }
 
-  const exportJson = async () => {
-    const blob = await api.exportJson()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'upst_analysis.json'; a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  const exportSummary = async () => {
-    const blob = await api.exportSummary()
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url; a.download = 'upst_daily_summary.txt'; a.click()
-    URL.revokeObjectURL(url)
-  }
+  const exportCsv = () => downloadBlob(() => api.exportCsv(), 'upst_analysis.csv')
+  const exportJson = () => downloadBlob(() => api.exportJson(), 'upst_analysis.json')
+  const exportSummary = () => downloadBlob(() => api.exportSummary(), 'upst_daily_summary.txt')
 
   const severityColor = (s) => s === 'urgent' || s === 'critical' ? 'text-terminal-red' : s === 'warning' ? 'text-terminal-amber' : 'text-terminal-muted'
 
   return (
     <div className="space-y-4">
       <Panel title="Export">
-        <div className="flex gap-3">
+        <div className="flex gap-3 flex-wrap">
           <button onClick={exportCsv} className="px-3 py-1.5 bg-terminal-panel border border-terminal-border rounded text-xs hover:bg-terminal-border">Export CSV</button>
           <button onClick={exportJson} className="px-3 py-1.5 bg-terminal-panel border border-terminal-border rounded text-xs hover:bg-terminal-border">Export JSON</button>
           <button onClick={exportSummary} className="px-3 py-1.5 bg-terminal-panel border border-terminal-border rounded text-xs hover:bg-terminal-border">Daily Summary (.txt)</button>
         </div>
+        {exportError && <div className="mt-2 text-xs text-terminal-red">{exportError}</div>}
       </Panel>
 
       <Panel title={`Alerts (${alerts.length})`}>

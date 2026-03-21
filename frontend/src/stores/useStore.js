@@ -15,6 +15,7 @@ const useStore = create((set, get) => ({
   lastUpdated: null,
   wsConnected: false,
   _ws: null,
+  _wsReconnectAttempt: 0,
 
   // Actions
   setActiveTab: (tab) => set({ activeTab: tab }),
@@ -28,7 +29,7 @@ const useStore = create((set, get) => ({
     const ws = new WebSocket(wsUrl)
 
     ws.onopen = () => {
-      set({ wsConnected: true, _ws: ws })
+      set({ wsConnected: true, _ws: ws, _wsReconnectAttempt: 0 })
     }
 
     ws.onmessage = (event) => {
@@ -52,11 +53,16 @@ const useStore = create((set, get) => ({
 
     ws.onclose = () => {
       set({ wsConnected: false, _ws: null })
-      // Reconnect after 5 seconds
-      setTimeout(() => {
-        const store = get()
-        if (!store.wsConnected) store.connectWebSocket()
-      }, 5000)
+      // Reconnect with exponential backoff (max 60s, max 10 attempts)
+      const attempt = get()._wsReconnectAttempt
+      if (attempt < 10) {
+        const delay = Math.min(2000 * Math.pow(2, attempt), 60000)
+        set({ _wsReconnectAttempt: attempt + 1 })
+        setTimeout(() => {
+          const store = get()
+          if (!store.wsConnected) store.connectWebSocket()
+        }, delay)
+      }
     }
 
     ws.onerror = () => {
