@@ -39,6 +39,20 @@ class SchedulerService:
             )
         )
 
+        # News intelligence refresh
+        if settings.news_intelligence_enabled:
+            async def _refresh_news_intel():
+                from backend.services.news_intelligence_service import news_intelligence_service
+                await news_intelligence_service.get_full_intelligence(force_refresh=True)
+
+            self._tasks["news_intelligence"] = asyncio.create_task(
+                self._periodic(
+                    "news_intelligence",
+                    settings.news_intelligence_refresh_seconds,
+                    _refresh_news_intel,
+                )
+            )
+
         logger.info("Scheduler started with %d tasks", len(self._tasks))
 
     async def stop(self):

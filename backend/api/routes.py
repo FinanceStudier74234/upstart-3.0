@@ -183,6 +183,62 @@ async def news_sentiment():
     return analysis.news
 
 
+@router.get("/news-intelligence")
+async def news_intelligence():
+    """Full news intelligence analysis — CEO tracking, IR, social, narrative."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_full_intelligence()
+
+
+@router.get("/news-intelligence/headlines")
+async def news_headlines(limit: int = Query(10, ge=1, le=50)):
+    """Top headlines sorted by relevance and recency."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_latest_headlines(limit=limit)
+
+
+@router.get("/news-intelligence/sentiment")
+async def news_intel_sentiment():
+    """Compact sentiment summary across all sources."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_sentiment_summary()
+
+
+@router.get("/news-intelligence/ceo")
+async def ceo_tracker():
+    """CEO activity and statement tracking."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_ceo_tracker()
+
+
+@router.get("/news-intelligence/ir")
+async def ir_tracker():
+    """Investor relations intelligence."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_ir_tracker()
+
+
+@router.get("/news-intelligence/social")
+async def social_pulse():
+    """Social media sentiment pulse."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_social_pulse()
+
+
+@router.get("/news-intelligence/narrative")
+async def narrative_analysis():
+    """Market narrative and catalyst analysis."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return await news_intelligence_service.get_narrative_analysis()
+
+
+@router.get("/news-intelligence/history")
+async def news_intel_history(limit: int = Query(20, ge=1, le=100)):
+    """Historical intelligence snapshots for trend analysis."""
+    from backend.services.news_intelligence_service import news_intelligence_service
+    return {"history": news_intelligence_service.get_history(limit=limit)}
+
+
 @router.get("/learning")
 async def learning():
     """Learning engine report."""

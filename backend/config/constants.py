@@ -156,6 +156,47 @@ SCORE_FORMULAS = {
     },
 }
 
+# ── News Intelligence ──
+NEWS_CATEGORIES = [
+    "earnings", "funding", "origination", "macro", "fed", "credit",
+    "fintech", "regulatory", "world", "peer", "general", "leadership",
+    "product", "partnership", "ir_release", "social", "analyst",
+]
+
+NEWS_SOURCE_TYPES = ["news", "social", "ir", "ceo", "sec", "analyst"]
+
+# Sentiment keyword dictionaries for news scoring
+NEWS_POSITIVE_KEYWORDS = [
+    "beat", "beats", "exceeded", "record", "growth", "expand", "launch",
+    "partnership", "upgrade", "bullish", "rally", "profit", "profitable",
+    "revenue growth", "origination", "approval", "approved", "new product",
+    "momentum", "outperform", "raised guidance", "strong", "accelerat",
+    "milestone", "breakthrough", "innovative", "surpass", "upside",
+]
+
+NEWS_NEGATIVE_KEYWORDS = [
+    "miss", "missed", "decline", "loss", "downgrade", "bearish", "sell",
+    "concern", "risk", "lawsuit", "probe", "investigation", "delinquency",
+    "default", "layoff", "cut", "warning", "weak", "slowdown", "headwind",
+    "regulatory scrutiny", "black box", "uncertain", "volatile", "crash",
+    "plunge", "short seller", "fraud", "overvalued", "bubble",
+]
+
+NEWS_UPST_KEYWORDS = [
+    "upstart", "upst", "ai lending", "ai credit", "ai underwriting",
+    "dave girouard", "paul gu", "sanjay datta",
+]
+
+CEO_POSITIVE_TONE_WORDS = [
+    "excited", "incredible", "record", "milestone", "transformative",
+    "accelerating", "confident", "optimistic", "proud", "thrilled",
+]
+
+CEO_CAUTIOUS_TONE_WORDS = [
+    "cautious", "prudent", "careful", "measured", "conservative",
+    "challenge", "headwind", "uncertain", "navigating",
+]
+
 # ── Alert Thresholds ──
 ALERT_THRESHOLDS = {
     "iv_extreme_pct": 100,       # ATM IV > 100% = critical

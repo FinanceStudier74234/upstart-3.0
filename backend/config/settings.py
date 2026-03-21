@@ -40,12 +40,19 @@ class Settings(BaseSettings):
     newsapi_key: str = ""
     sec_edgar_user_agent: str = "upst-hub@example.com"
 
+    # ── News Intelligence ──
+    news_intelligence_enabled: bool = True
+    news_intelligence_cache_ttl: int = 300  # 5 minutes
+    news_intelligence_max_sources: int = 10
+    news_intelligence_fetch_timeout: int = 30  # seconds per source
+
     # ── Scheduling ──
     scheduler_enabled: bool = True
     market_data_refresh_seconds: int = 60
     options_data_refresh_seconds: int = 300
     macro_data_refresh_seconds: int = 3600
     news_refresh_seconds: int = 600
+    news_intelligence_refresh_seconds: int = 600  # 10 minutes
     short_data_refresh_seconds: int = 1800
 
     # ── Mock Mode ──

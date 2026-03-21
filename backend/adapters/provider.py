@@ -24,6 +24,11 @@ from backend.adapters.mock_adapter import (
     MockMarketAdapter, MockMacroAdapter, MockShortAdapter,
     MockNewsAdapter, MockFundamentalAdapter,
 )
+try:
+    from backend.adapters.news_intelligence_adapter import NewsIntelligenceAdapter
+except ImportError:
+    NewsIntelligenceAdapter = None
+
 from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -53,8 +58,11 @@ class DataProvider:
         # Short chain: ORTEX → Fintel → Mock
         self._short_adapters: list[BaseShortAdapter] = [MockShortAdapter()]
 
-        # News chain: Finnhub → NewsAPI → Mock
-        self._news_adapters: list[BaseNewsAdapter] = [MockNewsAdapter()]
+        # News chain: NewsIntelligence → Mock
+        self._news_adapters: list[BaseNewsAdapter] = []
+        if not self._mock_mode and NewsIntelligenceAdapter is not None:
+            self._news_adapters.append(NewsIntelligenceAdapter())
+        self._news_adapters.append(MockNewsAdapter())
 
         # Fundamentals chain: Yahoo → Mock
         self._fundamental_adapters: list[BaseFundamentalAdapter] = []

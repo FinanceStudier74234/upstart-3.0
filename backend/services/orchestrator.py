@@ -39,6 +39,7 @@ from backend.engines.backtest import BacktestEngine
 from backend.engines.behavioral import BehavioralEngine
 from backend.engines.learning import LearningEngine
 from backend.engines.news import NewsEngine
+from backend.engines.news_intelligence import NewsIntelligenceEngine
 from backend.bots.price_action_bot import PriceActionBot
 from backend.bots.squeeze_bot import SqueezeBot
 from backend.bots.macro_shock_bot import MacroShockBot
@@ -86,6 +87,9 @@ class FullAnalysis:
     news: dict = field(default_factory=dict)
     learning: dict = field(default_factory=dict)
 
+    # News intelligence
+    news_intelligence: dict = field(default_factory=dict)
+
     # Data quality
     data_sources: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -123,6 +127,7 @@ class Orchestrator:
         self.behavioral_engine = BehavioralEngine()
         self.learning_engine = LearningEngine()
         self.news_engine = NewsEngine()
+        self.news_intelligence_engine = NewsIntelligenceEngine()
 
         # Bots
         self.bots = {
@@ -346,6 +351,14 @@ class Orchestrator:
             "news", self.news_engine.analyze, news_data=news_items)
         if news_snap:
             analysis.news = self._snapshot_to_dict(news_snap)
+
+        # News Intelligence (enhanced analysis across all sources)
+        ni_snap = self._safe_engine_call(
+            "news_intelligence", self.news_intelligence_engine.analyze,
+            news_data=news_items,
+        )
+        if ni_snap:
+            analysis.news_intelligence = self._snapshot_to_dict(ni_snap)
 
         # Learning
         analysis.learning = self.learning_engine.get_report()
