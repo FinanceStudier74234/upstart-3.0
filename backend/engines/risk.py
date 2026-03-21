@@ -62,6 +62,8 @@ class RiskEngine:
         win_rate: float = 0.50,
         avg_win: float = 0.05,
         avg_loss: float = 0.03,
+        existing_exposure_pct: float = 0.0,
+        risk_budget_total_pct: float = 20.0,
     ) -> RiskMetrics:
         """Compute full risk profile from return series."""
         rm = RiskMetrics()
@@ -131,6 +133,11 @@ class RiskEngine:
             win_rate, avg_win, avg_loss, rm.drawdown_threshold_pct / 100,
         )
         rm.survival_probability = round(100 - (rm.risk_of_ruin_pct or 0), 2)
+
+        # ── Risk Budget ──
+        # Track how much of the total risk budget is consumed by existing exposure
+        rm.risk_budget_used_pct = round(min(100.0, existing_exposure_pct / max(risk_budget_total_pct, 0.01) * 100), 2)
+        rm.remaining_risk_budget_pct = round(max(0.0, 100.0 - rm.risk_budget_used_pct), 2)
 
         return rm
 
