@@ -18,9 +18,9 @@ from backend.adapters.base import (
 
 logger = logging.getLogger(__name__)
 
-# Seed for reproducibility in demos
-random.seed(42)
-np.random.seed(42)
+# Local RNG for reproducibility without polluting global state
+_rng = random.Random(42)
+_np_rng = np.random.RandomState(42)
 
 
 def _gbm_path(s0: float, mu: float, sigma: float, days: int) -> list[float]:
@@ -28,7 +28,7 @@ def _gbm_path(s0: float, mu: float, sigma: float, days: int) -> list[float]:
     dt_val = 1 / 252
     prices = [s0]
     for _ in range(days):
-        z = np.random.standard_normal()
+        z = _np_rng.standard_normal()
         s = prices[-1] * math.exp((mu - 0.5 * sigma**2) * dt_val + sigma * math.sqrt(dt_val) * z)
         prices.append(round(s, 2))
     return prices
@@ -42,14 +42,14 @@ class MockMarketAdapter(BaseMarketAdapter):
 
     async def get_quote(self, ticker: str) -> DataEnvelope:
         base = self._base_price if ticker == "UPST" else self._spy_price
-        jitter = base * random.uniform(-0.02, 0.02)
+        jitter = base * _rng.uniform(-0.02, 0.02)
         price = round(base + jitter, 2)
         return DataEnvelope(
             data={
                 "ticker": ticker, "price": price,
-                "previous_close": round(price - random.uniform(-2, 2), 2),
+                "previous_close": round(price - _rng.uniform(-2, 2), 2),
                 "market_cap": round(price * 85e6, 0) if ticker == "UPST" else None,
-                "volume": random.randint(2_000_000, 8_000_000),
+                "volume": _rng.randint(2_000_000, 8_000_000),
             },
             source="mock", source_label="mock", confidence=0.5,
             warnings=["Mock data — not real market data"],
@@ -68,14 +68,14 @@ class MockMarketAdapter(BaseMarketAdapter):
         cur = start
         for i, c in enumerate(closes):
             if cur.weekday() < 5:  # Skip weekends
-                h = round(c * random.uniform(1.0, 1.04), 2)
-                l = round(c * random.uniform(0.96, 1.0), 2)
-                o = round(random.uniform(l, h), 2)
+                h = round(c * _rng.uniform(1.0, 1.04), 2)
+                l = round(c * _rng.uniform(0.96, 1.0), 2)
+                o = round(_rng.uniform(l, h), 2)
                 records.append({
                     "ticker": ticker, "timeframe": timeframe,
                     "bar_time": dt.datetime.combine(cur, dt.time(16, 0), tzinfo=dt.timezone.utc),
                     "open": o, "high": h, "low": l, "close": c,
-                    "volume": random.randint(1_000_000, 10_000_000),
+                    "volume": _rng.randint(1_000_000, 10_000_000),
                     "vwap": round((h + l + c) / 3, 2),
                 })
             cur += dt.timedelta(days=1)
@@ -93,20 +93,20 @@ class MockMarketAdapter(BaseMarketAdapter):
             for pct in [-0.20, -0.15, -0.10, -0.05, 0.0, 0.05, 0.10, 0.15, 0.20]:
                 strike = round(price * (1 + pct) / 2.5) * 2.5  # Round to nearest 2.50
                 for opt_type in ["call", "put"]:
-                    iv = round(random.uniform(0.50, 1.20), 4) if ticker == "UPST" else round(random.uniform(0.12, 0.25), 4)
+                    iv = round(_rng.uniform(0.50, 1.20), 4) if ticker == "UPST" else round(_rng.uniform(0.12, 0.25), 4)
                     mid = round(max(0.05, price * iv * math.sqrt(weeks_out / 52) * 0.4), 2)
                     contracts.append({
                         "ticker": ticker, "option_type": opt_type,
                         "strike": strike, "expiration": exp.isoformat(),
                         "bid": round(mid * 0.95, 2), "ask": round(mid * 1.05, 2),
                         "mark": mid, "last": mid,
-                        "volume": random.randint(0, 5000),
-                        "open_interest": random.randint(0, 20000),
+                        "volume": _rng.randint(0, 5000),
+                        "open_interest": _rng.randint(0, 20000),
                         "implied_volatility": iv,
-                        "delta": round(random.uniform(-1, 1), 4),
-                        "gamma": round(random.uniform(0, 0.1), 6),
-                        "theta": round(-random.uniform(0, 0.5), 4),
-                        "vega": round(random.uniform(0, 0.5), 4),
+                        "delta": round(_rng.uniform(-1, 1), 4),
+                        "gamma": round(_rng.uniform(0, 0.1), 6),
+                        "theta": round(-_rng.uniform(0, 0.5), 4),
+                        "vega": round(_rng.uniform(0, 0.5), 4),
                         "in_the_money": (opt_type == "call" and strike < price) or (opt_type == "put" and strike > price),
                     })
         return DataEnvelope(
@@ -133,7 +133,7 @@ class MockMacroAdapter(BaseMacroAdapter):
         today = dt.date.today()
         for i in range(252):
             d = today - dt.timedelta(days=i)
-            jitter = base * random.uniform(-0.03, 0.03)
+            jitter = base * _rng.uniform(-0.03, 0.03)
             records.append({
                 "indicator": indicator,
                 "observation_date": d.isoformat(),
@@ -148,7 +148,7 @@ class MockMacroAdapter(BaseMacroAdapter):
 class MockShortAdapter(BaseShortAdapter):
 
     async def get_short_interest(self, ticker: str) -> DataEnvelope:
-        si_pct = round(random.uniform(8, 25), 2)
+        si_pct = round(_rng.uniform(8, 25), 2)
         shares_float = 75_000_000
         si = int(shares_float * si_pct / 100)
         return DataEnvelope(
@@ -158,8 +158,8 @@ class MockShortAdapter(BaseShortAdapter):
                 "short_interest": si,
                 "shares_float": shares_float,
                 "short_pct_float": si_pct,
-                "days_to_cover": round(random.uniform(1.5, 6.0), 2),
-                "avg_volume_30d": random.randint(3_000_000, 8_000_000),
+                "days_to_cover": round(_rng.uniform(1.5, 6.0), 2),
+                "avg_volume_30d": _rng.randint(3_000_000, 8_000_000),
             },
             source="mock", source_label="mock", confidence=0.5,
         )
@@ -169,11 +169,11 @@ class MockShortAdapter(BaseShortAdapter):
             data={
                 "ticker": ticker,
                 "snapshot_date": dt.date.today().isoformat(),
-                "cost_to_borrow": round(random.uniform(1.0, 15.0), 2),
-                "utilization": round(random.uniform(40, 95), 1),
-                "shares_available": random.randint(100_000, 2_000_000),
-                "lendable_shares": random.randint(5_000_000, 20_000_000),
-                "borrow_fee_trend": random.choice(["rising", "stable", "falling"]),
+                "cost_to_borrow": round(_rng.uniform(1.0, 15.0), 2),
+                "utilization": round(_rng.uniform(40, 95), 1),
+                "shares_available": _rng.randint(100_000, 2_000_000),
+                "lendable_shares": _rng.randint(5_000_000, 20_000_000),
+                "borrow_fee_trend": _rng.choice(["rising", "stable", "falling"]),
             },
             source="mock", source_label="mock", confidence=0.5,
         )
@@ -203,10 +203,10 @@ class MockNewsAdapter(BaseNewsAdapter):
                 "published_at": (now - dt.timedelta(hours=i * 8)).isoformat(),
                 "headline": self._HEADLINES[i],
                 "summary": f"Mock summary for: {self._HEADLINES[i]}",
-                "source_name": random.choice(["Reuters", "Bloomberg", "CNBC", "MarketWatch"]),
-                "category": random.choice(["earnings", "funding", "macro", "fintech", "general"]),
-                "sentiment_score": round(random.uniform(-0.8, 0.8), 3),
-                "relevance_score": round(random.uniform(0.3, 1.0), 3),
+                "source_name": _rng.choice(["Reuters", "Bloomberg", "CNBC", "MarketWatch"]),
+                "category": _rng.choice(["earnings", "funding", "macro", "fintech", "general"]),
+                "sentiment_score": round(_rng.uniform(-0.8, 0.8), 3),
+                "relevance_score": round(_rng.uniform(0.3, 1.0), 3),
             })
         return DataEnvelope(data=items, source="mock", source_label="mock", confidence=0.5)
 
@@ -225,13 +225,13 @@ class MockFundamentalAdapter(BaseFundamentalAdapter):
                 "fiscal_year": 2025 - q // 4,
                 "revenue": rev,
                 "fee_revenue": round(rev * 0.85),
-                "gross_margin": round(random.uniform(0.70, 0.80), 4),
-                "operating_margin": round(random.uniform(-0.10, 0.10), 4),
-                "ebitda": round(rev * random.uniform(-0.05, 0.15)),
-                "adjusted_ebitda": round(rev * random.uniform(0.0, 0.20)),
-                "eps_diluted": round(random.uniform(-0.50, 0.30), 2),
-                "cash_and_equivalents": round(random.uniform(400e6, 900e6)),
-                "total_debt": round(random.uniform(500e6, 1500e6)),
+                "gross_margin": round(_rng.uniform(0.70, 0.80), 4),
+                "operating_margin": round(_rng.uniform(-0.10, 0.10), 4),
+                "ebitda": round(rev * _rng.uniform(-0.05, 0.15)),
+                "adjusted_ebitda": round(rev * _rng.uniform(0.0, 0.20)),
+                "eps_diluted": round(_rng.uniform(-0.50, 0.30), 2),
+                "cash_and_equivalents": round(_rng.uniform(400e6, 900e6)),
+                "total_debt": round(_rng.uniform(500e6, 1500e6)),
                 "shares_outstanding": 85_000_000,
             })
         return DataEnvelope(data=quarters, source="mock", source_label="mock", confidence=0.5)
@@ -240,14 +240,14 @@ class MockFundamentalAdapter(BaseFundamentalAdapter):
         releases = []
         for q in range(8):
             d = dt.date.today() - dt.timedelta(days=q * 91)
-            implied = round(random.uniform(0.08, 0.18), 4)
-            realized = round(random.uniform(0.05, 0.25), 4)
+            implied = round(_rng.uniform(0.08, 0.18), 4)
+            realized = round(_rng.uniform(0.05, 0.25), 4)
             releases.append({
                 "ticker": ticker, "report_date": d.isoformat(),
-                "eps_estimate": round(random.uniform(-0.30, 0.20), 2),
-                "eps_actual": round(random.uniform(-0.20, 0.30), 2),
-                "revenue_estimate": round(random.uniform(130e6, 180e6)),
-                "revenue_actual": round(random.uniform(130e6, 200e6)),
+                "eps_estimate": round(_rng.uniform(-0.30, 0.20), 2),
+                "eps_actual": round(_rng.uniform(-0.20, 0.30), 2),
+                "revenue_estimate": round(_rng.uniform(130e6, 180e6)),
+                "revenue_actual": round(_rng.uniform(130e6, 200e6)),
                 "implied_move": implied, "realized_move": realized,
             })
         return DataEnvelope(data=releases, source="mock", source_label="mock", confidence=0.5)

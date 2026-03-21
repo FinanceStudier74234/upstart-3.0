@@ -353,7 +353,7 @@ async def news(
 # ── Alerts ──
 @router.get("/alerts")
 async def alerts(
-    severity: str | None = Query(None, pattern=r"^(info|warning|critical)$"),
+    severity: str | None = Query(None, pattern=r"^(info|warning|critical|urgent)$"),
     limit: int = Query(50, ge=1, le=200),
 ):
     """Get recent system alerts."""

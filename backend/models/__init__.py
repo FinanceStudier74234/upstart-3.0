@@ -20,7 +20,7 @@ from backend.models.funding import (
 )
 from backend.models.origination import OriginationData
 from backend.models.macro import MacroIndicator
-from backend.models.news import NewsItem
+from backend.models.news import NewsItem, NewsIntelligenceSnapshot
 from backend.models.scores import ScoreSnapshot
 from backend.models.forecasts import Forecast, ForecastValidation
 from backend.models.signals import Signal, TradeDecision
@@ -36,7 +36,7 @@ __all__ = [
     "FundingFacility", "Securitization", "FundingPartner",
     "OriginationData",
     "MacroIndicator",
-    "NewsItem",
+    "NewsItem", "NewsIntelligenceSnapshot",
     "ScoreSnapshot",
     "Forecast", "ForecastValidation",
     "Signal", "TradeDecision",
