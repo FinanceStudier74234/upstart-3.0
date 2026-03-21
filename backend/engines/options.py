@@ -139,9 +139,11 @@ class OptionsEngine:
             iv_min = iv_sorted[0]
             iv_max = iv_sorted[-1]
             # IV Rank: where ATM IV sits in the min-max range of all contract IVs
+            # NOTE: This is cross-sectional IV rank. For temporal IV rank (52-week),
+            # historical ATM IV time-series data is required from the adapter.
             if snap.atm_iv and iv_max > iv_min:
                 snap.iv_rank = round((snap.atm_iv - iv_min) / (iv_max - iv_min), 4)
-            # IV Percentile: % of IVs below ATM IV
+            # IV Percentile: % of IVs below ATM IV (cross-sectional)
             if snap.atm_iv:
                 below = sum(1 for iv in all_ivs if iv < snap.atm_iv)
                 snap.iv_percentile = round(below / len(all_ivs), 4)
@@ -152,9 +154,8 @@ class OptionsEngine:
                 iv = c.get("implied_volatility")
                 if exp and iv:
                     try:
-                        import datetime
-                        exp_date = datetime.date.fromisoformat(str(exp)[:10])
-                        dte = (exp_date - datetime.date.today()).days
+                        exp_date = dt.date.fromisoformat(str(exp)[:10])
+                        dte = (exp_date - dt.date.today()).days
                         if 7 <= dte <= 45:
                             near_term_ivs.append(iv)
                     except (ValueError, TypeError):

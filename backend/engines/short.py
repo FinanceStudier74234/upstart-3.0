@@ -104,8 +104,8 @@ class ShortEngine:
             if prev_si and snap.short_interest and prev_si > 0:
                 snap.short_change_pct = round((snap.short_interest - prev_si) / prev_si * 100, 2)
             elif snap.short_pct_float is not None:
-                # Estimate change from SI trend
-                snap.short_change_pct = round(np.random.uniform(-5, 5), 2)  # Simulated
+                # No previous SI available — default to zero change
+                snap.short_change_pct = 0.0
             # Short interest trend
             if snap.short_change_pct is not None:
                 if snap.short_change_pct > 5:
@@ -318,8 +318,9 @@ class ShortEngine:
         if trend == "neutral" and rsi and rsi < 50 and momentum == "down":
             snap.failed_rally_setup = True
 
-        # Lower high confirmed: price below recent high and downtrend
-        recent_high = tech.get("recent_high")
+        # Lower high confirmed: price below resistance and downtrend
+        resistance = tech.get("resistance_levels", [])
+        recent_high = resistance[0] if resistance else None
         if recent_high and price > 0 and price < recent_high * 0.95 and trend == "down":
             snap.lower_high_confirmed = True
 

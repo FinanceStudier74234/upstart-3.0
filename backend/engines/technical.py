@@ -122,10 +122,11 @@ class TechnicalEngine:
             if pd.notna(sma_last) and pd.notna(std_last):
                 snap.bollinger_upper = round(float(sma_last + BOLLINGER_STD * std_last), 4)
                 snap.bollinger_lower = round(float(sma_last - BOLLINGER_STD * std_last), 4)
-            bw = snap.bollinger_upper - snap.bollinger_lower
-            if bw > 0:
-                snap.bollinger_pct_b = round((price - snap.bollinger_lower) / bw, 4)
-                snap.bollinger_bandwidth = round(bw / float(sma.iloc[-1]) * 100, 4)
+            if snap.bollinger_upper is not None and snap.bollinger_lower is not None:
+                bw = snap.bollinger_upper - snap.bollinger_lower
+                if bw > 0:
+                    snap.bollinger_pct_b = round((price - snap.bollinger_lower) / bw, 4)
+                    snap.bollinger_bandwidth = round(bw / float(sma.iloc[-1]) * 100, 4)
 
         # ── ADX ──
         snap.adx = self._adx(high, low, close, ADX_PERIOD)
