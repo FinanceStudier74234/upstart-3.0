@@ -73,7 +73,7 @@ class BacktestEngine:
         """
         result = BacktestResult(strategy_name=strategy_name)
 
-        if df.empty or not signals:
+        if df.empty or signals is None or (hasattr(signals, '__len__') and len(signals) == 0):
             return result
 
         close = df["close"].astype(float)
