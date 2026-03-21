@@ -141,7 +141,25 @@ class StrategyBot(BaseBot):
         return max(0.01, k * math.exp(-0.05 * t) * norm.cdf(-d2) - s * norm.cdf(-d1))
 
     def _compute_pl_curve(self, strat, price_range, current_price):
-        return [{"price": round(p, 2), "pnl": round((p - current_price) / current_price * 100, 1)} for p in price_range]
+        result = []
+        stype = strat.get("type", "")
+        for p in price_range:
+            if stype == "equity":
+                pnl = (p - current_price) / current_price * 100
+            elif stype == "short_equity":
+                pnl = (current_price - p) / current_price * 100
+            elif stype == "long_call":
+                pnl = (max(0, p - strat["strike"]) - strat["cost"]) / strat["cost"] * 100
+            elif stype == "long_put":
+                pnl = (max(0, strat["strike"] - p) - strat["cost"]) / strat["cost"] * 100
+            elif stype == "call_spread":
+                pnl = (min(strat["short_strike"] - strat["long_strike"], max(0, p - strat["long_strike"])) - strat["cost"]) / strat["cost"] * 100
+            elif stype == "put_spread":
+                pnl = (min(strat["long_strike"] - strat["short_strike"], max(0, strat["long_strike"] - p)) - strat["cost"]) / strat["cost"] * 100
+            else:
+                pnl = 0
+            result.append({"price": round(p, 2), "pnl": round(pnl, 1)})
+        return result
 
     def _recommend(self, direction, iv, strategies):
         if iv > 0.8:

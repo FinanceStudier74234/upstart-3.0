@@ -104,7 +104,20 @@ class RegimeBot(BaseBot):
                 "regime_stability": self._stability_score(transitions, detected),
             },
             tables=[{"name": "Regime Transitions", "data": effects}],
-            assumptions={"vix": vix, "spy_trend": spy_trend, "credit_spread": credit_spread},
+            assumptions={
+                "vix": vix,
+                "spy_trend": spy_trend,
+                "credit_spread": credit_spread,
+                "regime_definitions": list(regimes.keys()),
+                "persistence_boost": 0.20,
+            },
+            limitations=[
+                "Transition matrix is heuristic, not calibrated to historical regime frequencies",
+                "No forward regime simulation — only 1-step transition probabilities",
+                "Regime duration modeling not included (no mean time in regime)",
+                "6 regimes may not capture all market states (e.g. crash, euphoria)",
+                "VIX/credit thresholds are fixed, not adaptive to evolving market structure",
+            ],
             confidence=0.50,
             explanation=f"Current regime: {detected}. {current_info['description']}",
         )

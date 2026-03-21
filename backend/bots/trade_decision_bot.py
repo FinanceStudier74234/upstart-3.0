@@ -108,6 +108,19 @@ class TradeDecisionBot(BaseBot):
             },
             explanation=explanation,
             confidence=0.6 if quality == "good" else 0.4 if quality == "moderate" else 0.2,
+            assumptions={
+                "score_thresholds": {"bullish": 60, "bearish": 40, "strong": 65, "weak": 35},
+                "conviction_multiplier": 1.3,
+                "squeeze_caution_threshold": 0.8,
+                "price": price,
+            },
+            limitations=[
+                "Signal weights are heuristic, not calibrated to historical accuracy",
+                "Vehicle comparison is qualitative, not quantitative P/L analysis",
+                "Decision thresholds are fixed, not regime-adaptive",
+                "No position sizing recommendation embedded in output",
+                "Confidence levels are discrete (0.2/0.4/0.6), not continuous",
+            ],
         )
 
     def _get_val(self, scores, name, default=50):

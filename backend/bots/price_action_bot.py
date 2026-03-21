@@ -45,6 +45,21 @@ class PriceActionBot(BaseBot):
         supports = [percentiles[25], percentiles[10], percentiles[5]]
         resistances = [percentiles[75], percentiles[90], percentiles[95]]
 
+        # Confidence interval and target probabilities
+        mean_final = float(np.mean(final))
+        std_final = float(np.std(final))
+        ci_lower = round(mean_final - 1.96 * std_final, 2)
+        ci_upper = round(mean_final + 1.96 * std_final, 2)
+
+        target_probabilities = {
+            "up_10pct": round(float(np.mean(final >= price * 1.10)), 4),
+            "up_20pct": round(float(np.mean(final >= price * 1.20)), 4),
+            "up_50pct": round(float(np.mean(final >= price * 1.50)), 4),
+            "down_10pct": round(float(np.mean(final <= price * 0.90)), 4),
+            "down_20pct": round(float(np.mean(final <= price * 0.80)), 4),
+            "down_50pct": round(float(np.mean(final <= price * 0.50)), 4),
+        }
+
         return self._create_output(
             results={
                 "percentiles": percentiles,
@@ -56,6 +71,8 @@ class PriceActionBot(BaseBot):
                 "projected_resistances": resistances,
                 "max_path": round(float(np.max(paths)), 2),
                 "min_path": round(float(np.min(paths)), 2),
+                "confidence_interval_95": {"lower": ci_lower, "upper": ci_upper},
+                "target_probabilities": target_probabilities,
             },
             paths=[paths[i].tolist() for i in range(min(50, n_paths))],  # Sample paths for chart
             assumptions={"drift": mu, "volatility": sigma, "beta": beta, "spy_scenario": spy_scenario},

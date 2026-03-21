@@ -76,6 +76,27 @@ class SqueezeBot(BaseBot):
         no_squeeze_prob = 1 - sum(s["probability"] for s in scenarios)
         expected_price = round(expected_squeeze + price * no_squeeze_prob, 2)
 
+        # Monte Carlo squeeze simulation (500 paths)
+        mc_n_paths = 500
+        mc_steps = 20
+        mc_paths_arr = np.zeros((mc_n_paths, mc_steps + 1))
+        mc_paths_arr[:, 0] = price
+        cover_prob = short_pct_float / 100 * utilization / 100
+
+        for step in range(1, mc_steps + 1):
+            # Determine which paths trigger covering at this step
+            triggers = np.random.random(mc_n_paths) < cover_prob
+            # Random price shock of 1-5% upward when covering triggers
+            shocks = np.where(triggers, 1 + np.random.uniform(0.01, 0.05, mc_n_paths), 1.0)
+            mc_paths_arr[:, step] = mc_paths_arr[:, step - 1] * shocks
+
+        mc_final = mc_paths_arr[:, -1]
+        mc_percentiles = {
+            int(p): round(float(np.percentile(mc_final, p)), 2)
+            for p in [5, 25, 50, 75, 95]
+        }
+        mc_sample_paths = [mc_paths_arr[i].tolist() for i in range(min(20, mc_n_paths))]
+
         return self._create_output(
             results={
                 "scenarios": scenarios,
@@ -83,6 +104,8 @@ class SqueezeBot(BaseBot):
                 "do_not_short_above": do_not_short_above,
                 "overall_squeeze_probability": round(sum(s["probability"] for s in scenarios), 4),
                 "max_squeeze_price": max(s["squeeze_price"] for s in scenarios),
+                "monte_carlo_squeeze_prices": mc_percentiles,
+                "mc_paths": mc_sample_paths,
                 "cover_urgency_zones": [
                     {"zone": "immediate_cover", "trigger": round(price * 1.05, 2)},
                     {"zone": "cautious_cover", "trigger": round(price * 1.10, 2)},

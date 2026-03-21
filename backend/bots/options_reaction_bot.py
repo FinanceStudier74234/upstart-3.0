@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 
+from scipy.stats import norm
+
 from backend.bots.base_bot import BaseBot, BotInput, BotOutput
 
 
@@ -53,6 +55,45 @@ class OptionsReactionBot(BaseBot):
                 else:
                     results_puts.append(entry)
 
+        # Greeks summary for ATM strike
+        s = new_price
+        vol = new_iv
+        t = dte_new / 365
+        atm_strike = min(strikes, key=lambda k: abs(k - s))
+        if t > 0 and vol > 0:
+            d1 = (math.log(s / atm_strike) + (0.05 + vol**2 / 2) * t) / (vol * math.sqrt(t))
+            delta_call = round(norm.cdf(d1), 4)
+            delta_put = round(delta_call - 1, 4)
+            gamma = round(norm.pdf(d1) / (s * vol * math.sqrt(t)), 6)
+            vega = round(s * norm.pdf(d1) * math.sqrt(t) / 100, 4)
+            theta = round(-(s * norm.pdf(d1) * vol) / (2 * math.sqrt(t)) / 365, 4)
+        else:
+            delta_call, delta_put, gamma, vega, theta = 0, 0, 0, 0, 0
+
+        greeks_summary = {
+            "atm_strike": atm_strike,
+            "delta_call": delta_call,
+            "delta_put": delta_put,
+            "gamma": gamma,
+            "vega": vega,
+            "theta": theta,
+        }
+
+        # 2D P/L surface: price changes × IV changes for ATM call
+        price_shifts = [-10, -5, 0, 5, 10]  # percent
+        iv_shifts = [-20, -10, 0, 10, 20]  # percent
+        atm_call_base = self._approx_option_price(price, atm_strike, base_iv, dte_base / 365, "call")
+        pl_surface = []
+        for ps in price_shifts:
+            row = {"price_change_pct": ps}
+            for ivs in iv_shifts:
+                scenario_price = price * (1 + ps / 100)
+                scenario_iv = base_iv * (1 + ivs / 100)
+                scenario_opt = self._approx_option_price(scenario_price, atm_strike, scenario_iv, dte_new / 365, "call")
+                pl = round(scenario_opt - atm_call_base, 2)
+                row[f"iv_change_{ivs}pct"] = pl
+            pl_surface.append(row)
+
         # Best structures
         best_bullish = "long_calls" if iv_change_pct <= 0 else "call_debit_spread"
         best_bearish = "long_puts" if iv_change_pct <= 0 else "put_debit_spread"
@@ -61,6 +102,8 @@ class OptionsReactionBot(BaseBot):
             results={
                 "calls": results_calls,
                 "puts": results_puts,
+                "greeks_summary": greeks_summary,
+                "pl_surface": pl_surface,
                 "best_bullish_structure": best_bullish,
                 "best_bearish_structure": best_bearish,
                 "iv_impact": "Elevated IV favors selling premium" if new_iv > 0.8 else "Lower IV favors buying premium",
@@ -83,7 +126,6 @@ class OptionsReactionBot(BaseBot):
         d1 = (math.log(s / k) + (0.05 + vol**2 / 2) * t) / (vol * math.sqrt(t))
         d2 = d1 - vol * math.sqrt(t)
 
-        from scipy.stats import norm
         if opt_type == "call":
             return max(0.01, s * norm.cdf(d1) - k * math.exp(-0.05 * t) * norm.cdf(d2))
         else:

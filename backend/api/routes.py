@@ -344,6 +344,18 @@ async def export_json():
     )
 
 
+@router.get("/export/html")
+async def export_html():
+    """Export analysis as styled HTML report."""
+    analysis = await orchestrator.run_full_analysis()
+    html_data = export_service.to_html(analysis.to_dict())
+    return Response(
+        content=html_data,
+        media_type="text/html",
+        headers={"Content-Disposition": "attachment; filename=upst_analysis_report.html"},
+    )
+
+
 @router.get("/export/summary")
 async def export_summary():
     """Export daily summary as text."""
