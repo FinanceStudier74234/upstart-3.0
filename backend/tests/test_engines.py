@@ -556,6 +556,9 @@ class TestMacroShockBot:
         assert out.is_simulation is True
         assert "scenarios" in out.results
         assert out.results.get("most_likely") is not None
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert len(out.results) >= 2
 
 
 class TestFundingStressBot:
@@ -584,6 +587,9 @@ class TestStrategyBot:
         assert out.is_simulation is True
         assert "strategies" in out.results
         assert "best_strategy" in out.results
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert len(out.results) >= 2
 
 
 class TestRegimeBot:
@@ -596,6 +602,10 @@ class TestRegimeBot:
         out = asyncio.run(bot.run(inp))
         assert out.is_simulation is True
         assert out.results.get("detected_regime") == "risk_off"
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert "transitions" in out.results
+        assert len(out.results) >= 2
 
 
 class TestOptionsReactionBot:
@@ -635,3 +645,7 @@ class TestTradeDecisionBot:
         out = asyncio.run(bot.run(inp))
         assert out.is_simulation is True
         assert "action" in out.results
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert "trade_quality" in out.results
+        assert len(out.results) >= 2
