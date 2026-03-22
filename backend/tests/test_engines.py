@@ -649,3 +649,146 @@ class TestTradeDecisionBot:
         assert out.bot_name is not None
         assert "trade_quality" in out.results
         assert len(out.results) >= 2
+
+
+# ═══════════════════════════════════════════════════════════════
+# Advanced PhD-Level Engine Tests
+# ═══════════════════════════════════════════════════════════════
+
+class TestGARCHEngine:
+    def test_fit_basic(self):
+        from backend.engines.garch import GARCHEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        result = GARCHEngine().fit(returns)
+        assert result.garch_converged is True
+        assert result.alpha is not None and result.alpha > 0
+        assert result.beta is not None and result.beta > 0
+        assert result.persistence is not None and 0 < result.persistence < 1.05
+        assert result.forecast_annualized_vol is not None and result.forecast_annualized_vol > 0
+        assert result.current_regime in ("low_vol", "normal_vol", "high_vol", "crisis_vol")
+        assert result.half_life_days is None or result.half_life_days > 0
+        assert result.vol_term_structure is not None and len(result.vol_term_structure) > 0
+
+    def test_insufficient_data(self):
+        from backend.engines.garch import GARCHEngine
+        result = GARCHEngine().fit(np.array([0.01, -0.02, 0.005]))
+        assert result.garch_converged is False
+
+
+class TestHMMRegimeEngine:
+    def test_fit_3_regimes(self):
+        from backend.engines.hmm_regime import HMMRegimeEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        result = HMMRegimeEngine().fit(returns)
+        assert result.current_regime != ""
+        assert result.current_regime_probabilities is not None
+        assert len(result.current_regime_probabilities) > 0
+        probs = list(result.current_regime_probabilities.values())
+        assert abs(sum(probs) - 1.0) < 0.05
+        assert result.transition_matrix is not None
+        assert result.regime_statistics is not None
+
+    def test_short_data(self):
+        from backend.engines.hmm_regime import HMMRegimeEngine
+        result = HMMRegimeEngine().fit(np.array([0.01] * 10))
+        assert result is not None
+
+
+class TestMultiFactorEngine:
+    def test_single_factor(self):
+        from backend.engines.multifactor import MultiFactorEngine
+        df = make_ohlcv_df()
+        returns = df["close"].pct_change().dropna().values
+        spy_returns = returns + np.random.normal(0, 0.005, len(returns))
+        result = MultiFactorEngine().analyze(returns, {"market": spy_returns})
+        assert result.r_squared is not None and 0 <= result.r_squared <= 1
+        assert "market" in result.betas
+        assert result.systematic_risk_pct is not None
+
+    def test_empty_factors(self):
+        from backend.engines.multifactor import MultiFactorEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        result = MultiFactorEngine().analyze(returns, {})
+        assert result.r_squared is None or result.r_squared == 0
+
+
+class TestKalmanBetaEngine:
+    def test_filter(self):
+        from backend.engines.kalman_beta import KalmanBetaEngine
+        df = make_ohlcv_df()
+        upst = df["close"].pct_change().dropna().values
+        spy = upst * 0.5 + np.random.normal(0, 0.01, len(upst))
+        result = KalmanBetaEngine().filter(upst, spy)
+        assert result.current_beta is not None
+        assert result.beta_std is not None and result.beta_std >= 0
+        assert result.beta_series is not None and len(result.beta_series) > 0
+
+    def test_short_data(self):
+        from backend.engines.kalman_beta import KalmanBetaEngine
+        result = KalmanBetaEngine().filter(np.array([0.01, 0.02]), np.array([0.005, 0.01]))
+        # Should handle gracefully
+        assert result is not None
+
+
+class TestCopulaRiskEngine:
+    def test_analyze(self):
+        from backend.engines.copula_risk import CopulaRiskEngine
+        df = make_ohlcv_df()
+        upst = df["close"].pct_change().dropna().values
+        spy = upst * 0.4 + np.random.normal(0, 0.01, len(upst))
+        result = CopulaRiskEngine().analyze(upst, spy)
+        assert result.lambda_lower is not None
+        assert result.lambda_upper is not None
+        assert result.conditional_var_5pct is not None
+
+    def test_short_data(self):
+        from backend.engines.copula_risk import CopulaRiskEngine
+        result = CopulaRiskEngine().analyze(np.array([0.01] * 5), np.array([0.005] * 5))
+        assert result is not None
+
+
+class TestARIMAForecastEngine:
+    def test_forecast(self):
+        from backend.engines.arima_forecast import ARIMAForecastEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        result = ARIMAForecastEngine().forecast(returns, horizon=21, price=70.0)
+        assert result.selected_order is not None
+        assert result.aic is not None
+        assert result.point_forecast is not None or result.selected_order is not None
+
+
+class TestVolSurfaceEngine:
+    def test_fit(self):
+        from backend.engines.vol_surface import VolSurfaceEngine
+        contracts = []
+        spot = 70.0
+        for strike in [60, 65, 70, 75, 80]:
+            for otype in ["call", "put"]:
+                iv = 0.65 + (strike - spot) * 0.005  # Simple skew
+                contracts.append({
+                    "strike": strike, "option_type": otype,
+                    "expiration": "2026-06-19", "implied_volatility": iv,
+                    "delta": 0.5 if strike == 70 else 0.3,
+                })
+        result = VolSurfaceEngine().fit(contracts, spot)
+        assert result is not None
+
+
+class TestMicrostructureEngine:
+    def test_analyze(self):
+        from backend.engines.microstructure import MicrostructureEngine
+        df = make_ohlcv_df()
+        bars = []
+        for idx, row in df.iterrows():
+            bars.append({
+                "open": float(row["open"]), "high": float(row["high"]),
+                "low": float(row["low"]), "close": float(row["close"]),
+                "volume": int(row["volume"]),
+            })
+        result = MicrostructureEngine().analyze(bars)
+        assert result.kyle_lambda is not None
+        assert result.amihud_illiquidity is not None
+        assert result.vpin is not None
+        assert result.roll_spread is not None
+        assert result.flow_toxicity_regime in ("normal", "elevated", "toxic")
+        assert 0 <= result.liquidity_score <= 100

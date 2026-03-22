@@ -40,6 +40,41 @@ from backend.engines.behavioral import BehavioralEngine
 from backend.engines.learning import LearningEngine
 from backend.engines.news import NewsEngine
 from backend.engines.news_intelligence import NewsIntelligenceEngine
+
+# Advanced PhD-level engines
+try:
+    from backend.engines.garch import GARCHEngine
+except ImportError:
+    GARCHEngine = None
+try:
+    from backend.engines.hmm_regime import HMMRegimeEngine
+except ImportError:
+    HMMRegimeEngine = None
+try:
+    from backend.engines.multifactor import MultiFactorEngine
+except ImportError:
+    MultiFactorEngine = None
+try:
+    from backend.engines.vol_surface import VolSurfaceEngine
+except ImportError:
+    VolSurfaceEngine = None
+try:
+    from backend.engines.microstructure import MicrostructureEngine
+except ImportError:
+    MicrostructureEngine = None
+try:
+    from backend.engines.kalman_beta import KalmanBetaEngine
+except ImportError:
+    KalmanBetaEngine = None
+try:
+    from backend.engines.copula_risk import CopulaRiskEngine
+except ImportError:
+    CopulaRiskEngine = None
+try:
+    from backend.engines.arima_forecast import ARIMAForecastEngine
+except ImportError:
+    ARIMAForecastEngine = None
+
 from backend.bots.price_action_bot import PriceActionBot
 from backend.bots.squeeze_bot import SqueezeBot
 from backend.bots.macro_shock_bot import MacroShockBot
@@ -90,6 +125,15 @@ class FullAnalysis:
     # News intelligence
     news_intelligence: dict = field(default_factory=dict)
 
+    # Advanced PhD-level engine outputs
+    garch: dict = field(default_factory=dict)
+    hmm_regime: dict = field(default_factory=dict)
+    multifactor: dict = field(default_factory=dict)
+    vol_surface: dict = field(default_factory=dict)
+    microstructure: dict = field(default_factory=dict)
+    kalman_beta: dict = field(default_factory=dict)
+    copula_risk: dict = field(default_factory=dict)
+
     # Data quality
     data_sources: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
@@ -128,6 +172,15 @@ class Orchestrator:
         self.learning_engine = LearningEngine()
         self.news_engine = NewsEngine()
         self.news_intelligence_engine = NewsIntelligenceEngine()
+
+        # Advanced PhD-level engines (graceful if not installed)
+        self.garch_engine = GARCHEngine() if GARCHEngine else None
+        self.hmm_engine = HMMRegimeEngine() if HMMRegimeEngine else None
+        self.multifactor_engine = MultiFactorEngine() if MultiFactorEngine else None
+        self.vol_surface_engine = VolSurfaceEngine() if VolSurfaceEngine else None
+        self.microstructure_engine = MicrostructureEngine() if MicrostructureEngine else None
+        self.kalman_beta_engine = KalmanBetaEngine() if KalmanBetaEngine else None
+        self.copula_risk_engine = CopulaRiskEngine() if CopulaRiskEngine else None
 
         # Bots
         self.bots = {
@@ -367,6 +420,67 @@ class Orchestrator:
         if learning_report:
             analysis.learning = learning_report
 
+        # ── 6b. Advanced PhD-Level Engines ──
+
+        # GARCH volatility modeling
+        if self.garch_engine and upst_returns is not None and len(upst_returns) > 100:
+            garch_result = self._safe_engine_call(
+                "garch", self.garch_engine.fit, upst_returns)
+            if garch_result:
+                analysis.garch = self._snapshot_to_dict(garch_result)
+
+        # HMM regime detection
+        if self.hmm_engine and upst_returns is not None and len(upst_returns) > 60:
+            hmm_result = self._safe_engine_call(
+                "hmm_regime", self.hmm_engine.fit, upst_returns)
+            if hmm_result:
+                analysis.hmm_regime = self._snapshot_to_dict(hmm_result)
+
+        # Multi-factor regression
+        if self.multifactor_engine and upst_returns is not None and spy_returns is not None:
+            factor_returns = {"market": spy_returns[:len(upst_returns)]}
+            mf_result = self._safe_engine_call(
+                "multifactor", self.multifactor_engine.analyze,
+                upst_returns, factor_returns)
+            if mf_result:
+                analysis.multifactor = self._snapshot_to_dict(mf_result)
+
+        # Vol surface (from options chain)
+        if self.vol_surface_engine and options_env.data:
+            contracts = options_env.data.get("contracts", [])
+            spot = options_env.data.get("underlying_price") or analysis.price
+            if contracts and spot > 0:
+                vs_result = self._safe_engine_call(
+                    "vol_surface", self.vol_surface_engine.fit, contracts, spot)
+                if vs_result:
+                    analysis.vol_surface = self._snapshot_to_dict(vs_result)
+
+        # Microstructure analysis
+        if self.microstructure_engine and upst_bars_env.data:
+            micro_result = self._safe_engine_call(
+                "microstructure", self.microstructure_engine.analyze,
+                upst_bars_env.data)
+            if micro_result:
+                analysis.microstructure = self._snapshot_to_dict(micro_result)
+
+        # Kalman filter time-varying beta
+        if self.kalman_beta_engine and upst_returns is not None and spy_returns is not None:
+            min_len = min(len(upst_returns), len(spy_returns))
+            kalman_result = self._safe_engine_call(
+                "kalman_beta", self.kalman_beta_engine.filter,
+                upst_returns[:min_len], spy_returns[:min_len])
+            if kalman_result:
+                analysis.kalman_beta = self._snapshot_to_dict(kalman_result)
+
+        # Copula tail risk
+        if self.copula_risk_engine and upst_returns is not None and spy_returns is not None:
+            min_len = min(len(upst_returns), len(spy_returns))
+            copula_result = self._safe_engine_call(
+                "copula_risk", self.copula_risk_engine.analyze,
+                upst_returns[:min_len], spy_returns[:min_len])
+            if copula_result:
+                analysis.copula_risk = self._snapshot_to_dict(copula_result)
+
         # ── 7. Scores (now with all engine data) ──
         scores = self._safe_engine_call(
             "scoring", self.scoring_engine.compute_all,
@@ -393,6 +507,8 @@ class Orchestrator:
             macro=analysis.macro,
             price=analysis.price,
             behavioral=analysis.behavioral,
+            hmm_regime=analysis.hmm_regime if analysis.hmm_regime else None,
+            garch=analysis.garch if analysis.garch else None,
         )
         if decision:
             analysis.trade_decision = self._snapshot_to_dict(decision)

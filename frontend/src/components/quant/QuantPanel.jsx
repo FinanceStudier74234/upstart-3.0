@@ -15,6 +15,13 @@ export default function QuantPanel({ analysis }) {
   const risk = analysis.risk || {}
   const reflex = analysis.reflexivity || {}
   const of = analysis.overfitting || {}
+  const garch = analysis.garch || {}
+  const hmm = analysis.hmm_regime || {}
+  const mf = analysis.multifactor || {}
+  const vs = analysis.vol_surface || {}
+  const micro = analysis.microstructure || {}
+  const kalman = analysis.kalman_beta || {}
+  const copula = analysis.copula_risk || {}
 
   return (
     <div className="space-y-4">
@@ -186,6 +193,164 @@ export default function QuantPanel({ analysis }) {
           </div>
         </div>
       </Panel>
+
+      {/* ── Advanced PhD-Level Analytics ── */}
+
+      {(garch.garch_converged || garch.alpha) && (
+        <Panel title="GARCH(1,1) / EGARCH / GJR-GARCH Volatility Model">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div><span className="text-terminal-muted">omega:</span> {garch.omega?.toExponential(3)}</div>
+            <div><span className="text-terminal-muted">alpha:</span> {garch.alpha?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">beta:</span> {garch.beta?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">Persistence:</span> <span className={garch.persistence > 0.98 ? 'text-terminal-red font-bold' : ''}>{garch.persistence?.toFixed(4)}</span></div>
+            <div><span className="text-terminal-muted">Forecast Vol (ann):</span> <span className="font-bold text-terminal-amber">{(garch.forecast_annualized_vol * 100)?.toFixed(1)}%</span></div>
+            <div><span className="text-terminal-muted">Unconditional Vol:</span> {garch.unconditional_volatility ? (garch.unconditional_volatility * Math.sqrt(252) * 100).toFixed(1) : '--'}%</div>
+            <div><span className="text-terminal-muted">Half-Life:</span> {garch.half_life_days?.toFixed(1)} days</div>
+            <div><span className="text-terminal-muted">Vol-of-Vol (ann):</span> {garch.vol_of_vol_annualized ? (garch.vol_of_vol_annualized * 100).toFixed(2) : '--'}%</div>
+            <div><span className="text-terminal-muted">Best Model:</span> <span className="font-bold">{garch.best_model}</span></div>
+            <div><span className="text-terminal-muted">Vol Regime:</span> <span className={`font-bold ${garch.current_regime === 'crisis_vol' ? 'text-terminal-red' : garch.current_regime === 'high_vol' ? 'text-terminal-amber' : 'text-terminal-green'}`}>{garch.current_regime}</span></div>
+          </div>
+          {garch.vol_term_structure && (
+            <div className="mt-3">
+              <div className="text-[10px] text-terminal-muted mb-1">Volatility Term Structure</div>
+              <ResponsiveContainer width="100%" height={120}>
+                <BarChart data={Object.entries(garch.vol_term_structure).map(([k, v]) => ({ horizon: k, vol: v * 100 }))}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis dataKey="horizon" tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                  <YAxis tick={{ fontSize: 9, fill: '#9ca3af' }} />
+                  <Tooltip contentStyle={{ background: '#1f2937', border: '1px solid #374151', fontSize: 10 }} formatter={v => [`${v.toFixed(1)}%`, 'Ann. Vol']} />
+                  <Bar dataKey="vol" fill="#8b5cf6" radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {(hmm.current_regime || hmm.current_regime_probabilities) && (
+        <Panel title="Hidden Markov Model — 3-State Regime Detection">
+          {hmm.current_regime_probabilities && (
+            <div className="grid grid-cols-3 gap-4 mb-3">
+              {Object.entries(hmm.current_regime_probabilities).map(([name, prob], i) => {
+                const colors = { bull: 'text-terminal-green', neutral: 'text-terminal-cyan', bear: 'text-terminal-red' }
+                const color = colors[name.toLowerCase()] || 'text-terminal-muted'
+                return (
+                  <div key={name} className={`text-center p-2 rounded ${hmm.current_regime === name ? 'bg-terminal-panel border border-terminal-border' : ''}`}>
+                    <div className="text-[10px] text-terminal-muted">{name.toUpperCase()}</div>
+                    <div className={`text-xl font-bold ${color}`}>{(prob * 100).toFixed(1)}%</div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+          {hmm.regime_statistics && hmm.regime_statistics.length > 0 && (
+            <div className="grid grid-cols-3 gap-2 text-[9px] text-terminal-muted mb-2">
+              {hmm.regime_statistics.map((rs, i) => (
+                <div key={i} className="text-center">
+                  mu_ann={rs.mean_return_ann?.toFixed(1)}% | vol_ann={rs.vol_ann?.toFixed(1)}%
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div><span className="text-terminal-muted">Current Regime:</span> <span className="font-bold">{hmm.current_regime?.toUpperCase() || '--'}</span></div>
+            <div><span className="text-terminal-muted">Converged:</span> {hmm.converged ? 'Yes' : 'No'} ({hmm.iterations} iters)</div>
+            {hmm.regime_change_alerts && hmm.regime_change_alerts.length > 0 && (
+              <div className="col-span-2 text-terminal-red font-bold">REGIME CHANGE DETECTED</div>
+            )}
+          </div>
+          {hmm.expected_regime_duration && (
+            <div className="mt-2 text-[10px] text-terminal-muted">
+              Expected durations: {Object.entries(hmm.expected_regime_duration).map(([k, v]) => `${k}=${v.toFixed(0)}d`).join(', ')}
+            </div>
+          )}
+        </Panel>
+      )}
+
+      {kalman.current_beta !== undefined && (
+        <Panel title="Kalman Filter — Time-Varying Beta">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div><span className="text-terminal-muted">Kalman Beta:</span> <span className="font-bold text-terminal-cyan">{kalman.current_beta?.toFixed(4)}</span></div>
+            <div><span className="text-terminal-muted">Beta Std:</span> {kalman.beta_std?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">5d Forecast:</span> {kalman.beta_forecast_5d?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">21d Forecast:</span> {kalman.beta_forecast_21d?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">Filtered Alpha:</span> {kalman.alpha_filtered?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">R² (filtered):</span> {kalman.r_squared_filtered?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Structural Breaks:</span> <span className={kalman.structural_breaks?.length > 0 ? 'text-terminal-red' : ''}>{kalman.structural_breaks?.length || 0}</span></div>
+          </div>
+        </Panel>
+      )}
+
+      {(copula.lambda_lower !== undefined || copula.conditional_var_5pct) && (
+        <Panel title="Copula Tail Risk (UPST vs SPY)">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+            <div><span className="text-terminal-muted">Lower Tail Dep (lambda_L):</span> <span className="font-bold text-terminal-red">{copula.lambda_lower?.toFixed(4)}</span></div>
+            <div><span className="text-terminal-muted">Upper Tail Dep (lambda_U):</span> <span className="font-bold text-terminal-green">{copula.lambda_upper?.toFixed(4)}</span></div>
+            <div><span className="text-terminal-muted">Student-t DoF:</span> {copula.student_t_df?.toFixed(1)}</div>
+            <div><span className="text-terminal-muted">Cond. VaR (SPY@5%):</span> <span className="text-terminal-red">{copula.conditional_var_5pct ? (copula.conditional_var_5pct * 100).toFixed(1) : '--'}%</span></div>
+            <div><span className="text-terminal-muted">Joint DD (10%/5%):</span> <span className="text-terminal-red">{copula.joint_drawdown_prob_10_5 ? (copula.joint_drawdown_prob_10_5 * 100).toFixed(2) : '--'}%</span></div>
+            <div><span className="text-terminal-muted">Portfolio VaR (copula):</span> {copula.portfolio_var_with_copula ? (copula.portfolio_var_with_copula * 100).toFixed(1) : '--'}%</div>
+          </div>
+          <div className="mt-2 text-[10px] text-terminal-muted">
+            Non-zero tail dependence = correlation increases in crashes. Gaussian copula assumes lambda=0 (dangerous).
+          </div>
+        </Panel>
+      )}
+
+      {micro.kyle_lambda !== undefined && (
+        <Panel title="Microstructure Intelligence">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
+            <div><span className="text-terminal-muted">Kyle Lambda:</span> {micro.kyle_lambda?.toExponential(3)}</div>
+            <div><span className="text-terminal-muted">Amihud Illiquidity:</span> {micro.amihud_illiquidity?.toExponential(3)}</div>
+            <div><span className="text-terminal-muted">VPIN:</span> <span className={micro.vpin > 0.7 ? 'text-terminal-red font-bold' : ''}>{micro.vpin?.toFixed(3)}</span></div>
+            <div><span className="text-terminal-muted">Roll Spread:</span> {(micro.roll_spread * 100)?.toFixed(3)}%</div>
+            <div><span className="text-terminal-muted">CS Spread:</span> {(micro.corwin_schultz_spread * 100)?.toFixed(3)}%</div>
+            <div><span className="text-terminal-muted">Flow Toxicity:</span> <span className={`font-bold ${micro.flow_toxicity_regime === 'toxic' ? 'text-terminal-red' : micro.flow_toxicity_regime === 'elevated' ? 'text-terminal-amber' : 'text-terminal-green'}`}>{micro.flow_toxicity_regime}</span></div>
+          </div>
+        </Panel>
+      )}
+
+      {vs.surface_regime && (
+        <Panel title="Volatility Surface (SABR)">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            <div><span className="text-terminal-muted">Surface Regime:</span> <span className="font-bold">{vs.surface_regime}</span></div>
+            <div><span className="text-terminal-muted">25d Risk Reversal:</span> {vs.risk_reversal_25d?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Butterfly:</span> {vs.butterfly_25d?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Term Slope:</span> {vs.term_structure_slope}</div>
+            <div><span className="text-terminal-muted">SABR rho:</span> {vs.sabr_rho?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">SABR nu (volvol):</span> {vs.sabr_nu?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Sticky Mode:</span> {vs.sticky_mode}</div>
+          </div>
+        </Panel>
+      )}
+
+      {mf.r_squared !== undefined && (
+        <Panel title="Multi-Factor Regression (Fama-French Style)">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mb-2">
+            <div><span className="text-terminal-muted">R²:</span> {mf.r_squared?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">Adj R²:</span> {mf.adj_r_squared?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">JB Normality p:</span> {mf.jarque_bera_p?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Durbin-Watson:</span> {mf.durbin_watson?.toFixed(3)}</div>
+            <div><span className="text-terminal-muted">Systematic Risk:</span> {mf.systematic_risk_pct?.toFixed(1)}%</div>
+            <div><span className="text-terminal-muted">Idiosyncratic Risk:</span> {mf.idiosyncratic_risk_pct?.toFixed(1)}%</div>
+            <div><span className="text-terminal-muted">Alpha (ann):</span> {mf.alpha_annualized?.toFixed(4)}</div>
+            <div><span className="text-terminal-muted">Style:</span> <span className="font-bold">{mf.style_classification}</span></div>
+          </div>
+          {mf.betas && (
+            <div className="space-y-1 text-[10px]">
+              <div className="text-terminal-muted font-bold mb-1">Factor Loadings:</div>
+              {Object.entries(mf.betas).map(([name, beta]) => (
+                <div key={name} className="flex justify-between">
+                  <span>{name}</span>
+                  <span className={mf.p_values?.[name] < 0.05 ? 'font-bold text-terminal-cyan' : 'text-terminal-muted'}>
+                    beta={beta?.toFixed(4)} (t={mf.t_stats?.[name]?.toFixed(2)}, p={mf.p_values?.[name]?.toFixed(3)})
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </Panel>
+      )}
     </div>
   )
 }

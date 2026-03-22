@@ -71,6 +71,19 @@ class ProbabilityEngine:
         mu = float(np.mean(returns))
         sigma = float(np.std(returns))
 
+        # Use GARCH conditional vol if available for more accurate estimates
+        garch_sigma = None
+        try:
+            from backend.engines.garch import GARCHEngine
+            garch = GARCHEngine()
+            garch_result = garch.fit(returns)
+            if garch_result.garch_converged and garch_result.conditional_volatility is not None:
+                garch_sigma = float(garch_result.conditional_volatility[-1])
+                sigma = garch_sigma  # Use GARCH vol as primary estimate
+                snap.calibration_score = 70.0  # Higher calibration with GARCH
+        except Exception:
+            pass  # Fall back to constant vol
+
         if sigma <= 0 or price <= 0:
             return snap
 
@@ -176,6 +189,24 @@ class ProbabilityEngine:
         return cone
 
     def _regime_probs(self, returns: np.ndarray) -> tuple[float, float, float]:
+        # Try HMM-based regime detection first (proper statistical model)
+        try:
+            from backend.engines.hmm_regime import HMMRegimeEngine
+            hmm = HMMRegimeEngine()
+            result = hmm.fit(returns)
+            if result.current_regime_probabilities:
+                probs = result.current_regime_probabilities
+                # Map to bull/neutral/bear ordering
+                bull = probs.get("bull", probs.get("Bull", 0.33))
+                neutral = probs.get("neutral", probs.get("Neutral", 0.34))
+                bear = probs.get("bear", probs.get("Bear", 0.33))
+                total = bull + neutral + bear
+                if total > 0:
+                    return (round(bull / total, 4), round(neutral / total, 4), round(bear / total, 4))
+        except Exception:
+            pass
+
+        # Fallback: momentum-based heuristic
         recent = returns[-21:] if len(returns) >= 21 else returns
         cum = float(np.sum(recent))
         if cum > 0.05:

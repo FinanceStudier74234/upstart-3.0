@@ -23,6 +23,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "yfinance>=0.2",
     "aiofiles>=23.2",
+    "aiohttp>=3.9",
     "orjson>=3.9",
     "python-dateutil>=2.8",
 ]

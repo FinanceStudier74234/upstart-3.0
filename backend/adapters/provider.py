@@ -9,6 +9,12 @@ from backend.adapters.base import (
     BaseMarketAdapter, BaseMacroAdapter, BaseShortAdapter,
     BaseNewsAdapter, BaseFundamentalAdapter, DataEnvelope,
 )
+
+try:
+    from backend.adapters.polygon_adapter import PolygonMarketAdapter
+except ImportError:
+    PolygonMarketAdapter = None
+
 try:
     from backend.adapters.yahoo_adapter import YahooMarketAdapter, YahooFundamentalAdapter
 except ImportError:
@@ -29,6 +35,11 @@ try:
 except ImportError:
     NewsIntelligenceAdapter = None
 
+try:
+    from backend.adapters.sec_edgar_adapter import SECEdgarAdapter
+except ImportError:
+    SECEdgarAdapter = None
+
 from backend.config.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -38,6 +49,14 @@ class DataProvider:
     """
     Central data provider. Selects the best available adapter based on
     configured API keys and falls back to mock when needed.
+
+    Priority chains (highest to lowest):
+      Market:  Polygon → Yahoo → Mock
+      Macro:   FRED → Mock
+      Short:   Mock (ORTEX/Fintel adapters can be added)
+      News:    NewsIntelligence → Mock
+      Fundamentals: Yahoo → Mock
+      Filings: SEC EDGAR (optional)
     """
 
     def __init__(self):
@@ -45,9 +64,18 @@ class DataProvider:
 
         # Market data chain: Polygon → Yahoo → Mock
         self._market_adapters: list[BaseMarketAdapter] = []
-        if not self._mock_mode and YahooMarketAdapter is not None:
-            self._market_adapters.append(YahooMarketAdapter())
+        if not self._mock_mode:
+            if PolygonMarketAdapter is not None and settings.has_polygon():
+                self._market_adapters.append(PolygonMarketAdapter())
+                logger.info("Polygon adapter enabled (plan=%s)", settings.polygon_plan)
+            if YahooMarketAdapter is not None:
+                self._market_adapters.append(YahooMarketAdapter())
         self._market_adapters.append(MockMarketAdapter())
+
+        # SEC EDGAR (optional, non-chain)
+        self._sec_adapter = None
+        if not self._mock_mode and SECEdgarAdapter is not None:
+            self._sec_adapter = SECEdgarAdapter()
 
         # Macro chain: FRED → Mock
         self._macro_adapters: list[BaseMacroAdapter] = []
@@ -105,6 +133,24 @@ class DataProvider:
 
     async def get_earnings(self, ticker: str) -> DataEnvelope:
         return await self._try_chain(self._fundamental_adapters, "get_earnings", ticker)
+
+    async def get_filings(self, ticker: str, filing_types: list[str] | None = None) -> DataEnvelope:
+        if self._sec_adapter:
+            try:
+                return await self._sec_adapter.get_filings(ticker, filing_types)
+            except Exception as e:
+                logger.warning("SEC EDGAR filings failed: %s", e)
+        return DataEnvelope(data=[], source="none", quality_score=0.0,
+                            warnings=["No SEC EDGAR adapter available"])
+
+    async def get_insider_transactions(self, ticker: str) -> DataEnvelope:
+        if self._sec_adapter:
+            try:
+                return await self._sec_adapter.get_insider_transactions(ticker)
+            except Exception as e:
+                logger.warning("SEC EDGAR insider transactions failed: %s", e)
+        return DataEnvelope(data=[], source="none", quality_score=0.0,
+                            warnings=["No SEC EDGAR adapter available"])
 
     async def _try_chain(self, adapters: list, method: str, *args) -> DataEnvelope:
         """Try each adapter in priority order; return first success."""

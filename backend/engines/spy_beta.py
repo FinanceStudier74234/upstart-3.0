@@ -179,6 +179,18 @@ class SPYBetaEngine:
             upst_ret, spy_ret, rel,
         )
 
+        # ── Kalman Filter Time-Varying Beta (if available) ──
+        try:
+            from backend.engines.kalman_beta import KalmanBetaEngine
+            kalman = KalmanBetaEngine()
+            kalman_result = kalman.filter(upst_ret.values, spy_ret.values)
+            if kalman_result.current_beta is not None:
+                rel.beta_for_scenarios = kalman_result.current_beta
+                # Use Kalman beta as rolling latest if available (more accurate)
+                rel.rolling_beta_latest = round(kalman_result.current_beta, 4)
+        except Exception:
+            pass
+
         return rel
 
     def _compute_relative_strength_score(

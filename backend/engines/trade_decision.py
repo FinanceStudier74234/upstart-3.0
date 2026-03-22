@@ -65,6 +65,8 @@ class TradeDecisionEngine:
         macro: dict | None = None,
         price: float = 0.0,
         behavioral: dict | None = None,
+        hmm_regime: dict | None = None,
+        garch: dict | None = None,
     ) -> TradeRecommendation:
         rec = TradeRecommendation()
         rec.entry_price = price
@@ -72,6 +74,26 @@ class TradeDecisionEngine:
         if not scores:
             rec.explanation = "Insufficient data to generate trade decision."
             return rec
+
+        # ── HMM Regime Context ──
+        regime_context = ""
+        if hmm_regime:
+            regime_probs = hmm_regime.get("regime_probs", [])
+            current_regime = hmm_regime.get("current_regime")
+            regime_names = ["bull", "neutral", "bear"]
+            if current_regime is not None and current_regime < len(regime_names):
+                regime_context = regime_names[current_regime]
+                if hmm_regime.get("regime_change_detected"):
+                    rec.risk_factors.append(f"HMM regime change detected — transitioning {regime_context}")
+
+        # ── GARCH Vol Context ──
+        vol_regime = ""
+        if garch:
+            vol_regime = garch.get("vol_regime", "")
+            if vol_regime == "crisis_vol":
+                rec.risk_factors.append("GARCH: Crisis-level volatility — reduce position sizes")
+            elif vol_regime == "high_vol":
+                rec.risk_factors.append("GARCH: Elevated volatility — widen stops, use options instead of stock")
 
         # Behavioral overrides / adjustments
         if behavioral:

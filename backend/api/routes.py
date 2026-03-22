@@ -260,6 +260,65 @@ async def overfitting():
     return analysis.overfitting
 
 
+# ── Advanced PhD-Level Engines ──
+
+@router.get("/garch")
+async def garch_volatility():
+    """GARCH(1,1) / EGARCH / GJR-GARCH volatility modeling."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.garch
+
+
+@router.get("/hmm-regime")
+async def hmm_regime():
+    """Hidden Markov Model regime detection (3-state: Bull/Neutral/Bear)."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.hmm_regime
+
+
+@router.get("/multifactor")
+async def multifactor():
+    """Fama-French style multi-factor regression and risk decomposition."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.multifactor
+
+
+@router.get("/vol-surface")
+async def vol_surface():
+    """Implied volatility surface, SABR calibration, and skew analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.vol_surface
+
+
+@router.get("/microstructure")
+async def microstructure():
+    """Kyle lambda, Amihud illiquidity, VPIN, Roll spread, order flow toxicity."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.microstructure
+
+
+@router.get("/kalman-beta")
+async def kalman_beta():
+    """Kalman filter time-varying beta estimation with structural break detection."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.kalman_beta
+
+
+@router.get("/copula-risk")
+async def copula_risk():
+    """Copula-based tail dependence (Student-t copula, conditional VaR, joint drawdown)."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.copula_risk
+
+
+@router.get("/filings")
+async def sec_filings(ticker: str = Query("UPST", max_length=10, pattern=r"^[A-Z]{1,5}$")):
+    """SEC EDGAR filings with covenant/funding keyword detection."""
+    from backend.adapters.provider import data_provider
+    env = await data_provider.get_filings(ticker)
+    return {"filings": env.data, "source": env.source}
+
+
 # ── Scenario Lab ──
 class ScenarioRequest(BaseModel):
     spy_return_pct: float = 0.0

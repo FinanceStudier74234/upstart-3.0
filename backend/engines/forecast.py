@@ -92,6 +92,16 @@ class ForecastEngine:
         regime = self._regime_forecast(close, returns, price, horizon_days, current_regime, ticker, now)
         forecasts.append(regime)
 
+        # Model 5: GARCH-based volatility forecast
+        garch_fc = self._garch_forecast(returns, price, horizon_days, ticker, now)
+        if garch_fc:
+            forecasts.append(garch_fc)
+
+        # Model 6: ARIMA-GARCH (if available)
+        arima_fc = self._arima_forecast(returns, price, horizon_days, ticker, now)
+        if arima_fc:
+            forecasts.append(arima_fc)
+
         # ── Ensemble ──
         ensemble = self._build_ensemble(forecasts, price)
         return ensemble
@@ -257,6 +267,102 @@ class ForecastEngine:
             explanation=f"Regime-conditional ({regime}): μ={mu:.2%}, σ={sigma:.2%}",
             confidence_score=40.0,
         )
+
+    def _garch_forecast(
+        self, returns: pd.Series, price: float, horizon: int, ticker: str, now: dt.datetime,
+    ) -> ForecastResult | None:
+        """GARCH(1,1)-based forecast using conditional volatility."""
+        try:
+            from backend.engines.garch import GARCHEngine
+            garch = GARCHEngine()
+            result = garch.fit(returns.values, horizon_days=horizon)
+
+            if not result.garch_converged or result.forecast_annualized_vol is None:
+                return None
+
+            mu = float(returns.mean()) * 252
+            sigma = result.forecast_annualized_vol
+            dt_frac = horizon / 252
+
+            projected = round(price * math.exp(mu * dt_frac), 2)
+            std_dev = sigma * math.sqrt(dt_frac) * price
+            lower = round(projected - 1.645 * std_dev, 2)
+            upper = round(projected + 1.645 * std_dev, 2)
+
+            # GARCH confidence is higher because it uses time-varying vol
+            persistence = result.persistence or 0
+            confidence = 60.0 if persistence < 0.99 else 35.0
+
+            # Get current vol from conditional volatility series
+            current_vol_ann = None
+            if result.conditional_volatility is not None and len(result.conditional_volatility) > 0:
+                current_vol_ann = float(result.conditional_volatility[-1]) * math.sqrt(252)
+
+            return ForecastResult(
+                ticker=ticker, forecast_time=now, horizon_days=horizon,
+                model_name="garch_volatility",
+                point_estimate=projected,
+                lower_bound=lower, upper_bound=upper,
+                assumptions={
+                    "garch_omega": round(result.omega, 8) if result.omega else None,
+                    "garch_alpha": round(result.alpha, 6) if result.alpha else None,
+                    "garch_beta": round(result.beta, 6) if result.beta else None,
+                    "persistence": round(persistence, 6),
+                    "half_life_days": round(result.half_life_days, 1) if result.half_life_days else None,
+                    "current_vol_ann": round(current_vol_ann, 4) if current_vol_ann else None,
+                    "forecast_vol_ann": round(sigma, 4),
+                    "vol_regime": result.current_regime,
+                },
+                explanation=(
+                    f"GARCH(1,1): persistence={persistence:.4f}, "
+                    f"forecast vol={sigma:.1%}, regime={result.current_regime}"
+                ),
+                confidence_score=confidence,
+            )
+        except Exception:
+            return None
+
+    def _arima_forecast(
+        self, returns: pd.Series, price: float, horizon: int, ticker: str, now: dt.datetime,
+    ) -> ForecastResult | None:
+        """ARIMA-GARCH combined forecast for conditional mean + variance."""
+        try:
+            from backend.engines.arima_forecast import ARIMAForecastEngine
+            arima = ARIMAForecastEngine()
+            result = arima.forecast(returns.values, horizon=horizon, price=price)
+
+            if not result.price_forecast:
+                return None
+
+            # Use final price forecast as point estimate
+            point_est = result.price_forecast[-1] if result.price_forecast else price
+            lower = result.price_intervals_95[0][0] if result.price_intervals_95 else price * 0.8
+            upper = result.price_intervals_95[0][1] if result.price_intervals_95 else price * 1.2
+
+            ljung_p = result.ljung_box_pvalue
+
+            return ForecastResult(
+                ticker=ticker, forecast_time=now, horizon_days=horizon,
+                model_name="arima_garch",
+                point_estimate=round(point_est, 2),
+                lower_bound=round(lower, 2),
+                upper_bound=round(upper, 2),
+                assumptions={
+                    "arima_order": list(result.selected_order) if result.selected_order else None,
+                    "aic": round(result.aic, 2) if result.aic else None,
+                    "ljung_box_p": round(ljung_p, 4) if ljung_p else None,
+                    "adf_statistic": round(result.adf_statistic, 4) if result.adf_statistic else None,
+                },
+                explanation=(
+                    f"ARIMA{result.selected_order}: AIC={result.aic:.1f}, "
+                    f"Ljung-Box p={ljung_p:.3f}"
+                    if result.aic and ljung_p
+                    else f"ARIMA{result.selected_order}"
+                ),
+                confidence_score=55.0 if ljung_p and ljung_p > 0.05 else 35.0,
+            )
+        except Exception:
+            return None
 
     def _estimate_half_life(self, log_prices: np.ndarray) -> float | None:
         """Estimate mean-reversion half-life via ADF-like regression."""
