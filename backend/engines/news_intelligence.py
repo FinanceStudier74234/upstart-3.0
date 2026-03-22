@@ -508,10 +508,8 @@ class NewsIntelligenceEngine:
             count = len(narrative.upcoming_catalysts)
             if count >= 3:
                 narrative.catalyst_proximity = "near"
-            elif count >= 1:
-                narrative.catalyst_proximity = "medium"
             else:
-                narrative.catalyst_proximity = "far"
+                narrative.catalyst_proximity = "medium"
         else:
             narrative.catalyst_proximity = "none"
 

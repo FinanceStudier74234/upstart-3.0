@@ -68,7 +68,7 @@ class BehavioralEngine:
                 snap.sentiment_extreme = "greed"
 
         # Trapped traders
-        if trend == "down" and rsi and rsi < 40:
+        if trend == "down" and rsi is not None and rsi < 40:
             snap.trapped_longs = True
             snap.trapped_direction = "longs"
         elif trend == "up" and short and short.get("squeeze_risk_score", 0) > 60:
@@ -76,10 +76,10 @@ class BehavioralEngine:
             snap.trapped_direction = "shorts"
 
         # Exhaustion
-        if rsi and rsi > 75 and vol_regime == "expanded":
+        if rsi is not None and rsi > 75 and vol_regime == "expanded":
             snap.exhaustion_move = True
             snap.exhaustion_type = "buying_exhaustion"
-        elif rsi and rsi < 25 and vol_regime == "expanded":
+        elif rsi is not None and rsi < 25 and vol_regime == "expanded":
             snap.exhaustion_move = True
             snap.exhaustion_type = "selling_exhaustion"
 

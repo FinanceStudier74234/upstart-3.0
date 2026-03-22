@@ -110,8 +110,8 @@ class ScenarioEngine:
 
         # ── Total price impact ──
         total_impact = (
-            spy_impact / 100 + rates_impact + orig_impact / 100 +
-            funding_impact / 100 + val_impact + macro_impact +
+            spy_impact / 100 + rates_impact + orig_impact +
+            funding_impact + val_impact + macro_impact +
             credit_impact + world_impact
         )
 

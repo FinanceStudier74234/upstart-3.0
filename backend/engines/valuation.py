@@ -121,7 +121,9 @@ class ValuationEngine:
         snap.peer_multiples = self._peer_multiples()
         peer_ps = [p["ps"] for p in snap.peer_multiples if p.get("ps")]
         if peer_ps and snap.price_to_sales:
-            median_ps = sorted(peer_ps)[len(peer_ps) // 2]
+            sorted_ps = sorted(peer_ps)
+            n = len(sorted_ps)
+            median_ps = (sorted_ps[(n - 1) // 2] + sorted_ps[n // 2]) / 2
             if median_ps > 0:
                 snap.vs_peer_median = round((snap.price_to_sales / median_ps - 1) * 100, 1)
 

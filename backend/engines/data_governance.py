@@ -202,7 +202,7 @@ class DataGovernanceEngine:
         return recs
 
     def _compute_score(self, snap: DataGovernanceSnapshot) -> float:
-        score = snap.overall_quality_score * 0.3 + snap.overall_freshness_score * 0.3 + snap.overall_coverage_pct * 0.2
+        score = snap.overall_quality_score * 0.35 + snap.overall_freshness_score * 0.35 + snap.overall_coverage_pct * 0.30
         score -= len(snap.critical_gaps) * 5
         score -= len(snap.overfitting_warnings) * 5
         score -= snap.data_snooping_risk * 0.1

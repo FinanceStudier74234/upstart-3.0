@@ -79,7 +79,7 @@ class ScoringEngine:
         weights = {"capacity": 0.25, "coverage": 0.20, "diversification": 0.15,
                     "maturity": 0.15, "renewal": 0.15, "covenants": 0.10}
 
-        components["capacity"] = min(100, data.get("total_committed", 0) / 30 * 100)  # $3B = 100
+        components["capacity"] = min(100, data.get("total_committed", 0) / 3 * 100)  # $3B = 100
         components["coverage"] = min(100, data.get("months_coverage", 0) / 24 * 100)  # 24mo = 100
         components["diversification"] = min(100, data.get("partner_count", 0) / 10 * 100)
         components["maturity"] = min(100, data.get("avg_months_to_maturity", 0) / 36 * 100)

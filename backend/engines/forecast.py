@@ -187,7 +187,7 @@ class ForecastEngine:
             lower_bound=lower, upper_bound=upper,
             probability_up=round(float(prob_up), 4),
             probability_down=round(float(prob_down), 4),
-            probability_flat=round(float(1 - prob_up - prob_down), 4),
+            probability_flat=round(max(0.0, float(1 - prob_up - prob_down)), 4),
             assumptions={"half_life": round(half_life, 1), "kappa": round(kappa, 4),
                           "target_price": round(target, 2)},
             explanation=f"OU mean-reversion, half-life={half_life:.0f} days, target=${target:.2f}",
