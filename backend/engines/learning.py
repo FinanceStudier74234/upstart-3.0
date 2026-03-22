@@ -18,6 +18,7 @@ class PredictionRecord:
     target_variable: str
     horizon_days: int
     predicted_value: float
+    reference_value: float | None = None  # baseline price at prediction time
     actual_value: float | None = None
     error: float | None = None
     direction_correct: bool | None = None
@@ -75,7 +76,10 @@ class LearningEngine:
                 # Direction correct: did actual and predicted agree on sign?
                 # Both represent returns or directional forecasts, so check
                 # if actual moved in the same direction the model predicted.
-                pred.direction_correct = (actual_value >= 0) == (pred.predicted_value >= 0)
+                if pred.reference_value is not None:
+                    pred.direction_correct = (actual_value >= pred.reference_value) == (pred.predicted_value >= pred.reference_value)
+                else:
+                    pred.direction_correct = (actual_value >= 0) == (pred.predicted_value >= 0)
                 pred.validated = True
                 self._update_model_performance(pred.model_name)
                 return True

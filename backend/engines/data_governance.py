@@ -62,7 +62,7 @@ class DataGovernanceEngine:
 
     def analyze(
         self,
-        data_sources: dict | None = None,
+        data_sources: list[dict] | None = None,
         analysis_metadata: dict | None = None,
     ) -> DataGovernanceSnapshot:
         snap = DataGovernanceSnapshot()

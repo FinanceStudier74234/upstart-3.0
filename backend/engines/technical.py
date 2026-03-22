@@ -220,8 +220,10 @@ class TechnicalEngine:
     def _adx(self, high: pd.Series, low: pd.Series, close: pd.Series, period: int) -> float | None:
         if len(close) < 2 * period:
             return None
-        plus_dm = high.diff().clip(lower=0)
-        minus_dm = (-low.diff()).clip(lower=0)
+        up_move = high.diff()
+        down_move = -low.diff()
+        plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+        minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=low.index)
         tr = pd.concat([
             high - low, (high - close.shift()).abs(), (low - close.shift()).abs(),
         ], axis=1).max(axis=1)

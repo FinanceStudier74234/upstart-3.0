@@ -147,7 +147,7 @@ class TradeDecisionEngine:
             rec.confidence = "low"
 
         # ── Risk Factors ──
-        rec.risk_factors = self._identify_risks(scores, short, macro)
+        rec.risk_factors.extend(self._identify_risks(scores, short, macro))
 
         # ── What Would Change ──
         rec.what_would_change = self._what_would_change(rec, scores)
