@@ -404,7 +404,11 @@ class TestAlertServiceSPYAlerts:
             "rolling_correlation": 0.5, "beta": 2.5, "alpha": 0.0,
         })
         alerts = svc.evaluate(analysis)
-        assert any(a.title == "Beta Regime Shift" for a in alerts)
+        alert = _find_alert(alerts, "Beta Regime Shift")
+        assert alert is not None
+        assert alert.severity in ("warning", "critical")
+        assert alert.category == "spy"
+        assert "2.5" in str(alert.value) or alert.value == 2.5
 
     def test_correlation_breakdown(self):
         svc = AlertService()
@@ -413,7 +417,11 @@ class TestAlertServiceSPYAlerts:
             "rolling_correlation": 0.05, "beta": 1.5, "alpha": 0.0,
         })
         alerts = svc.evaluate(analysis)
-        assert any(a.title == "Correlation Breakdown vs SPY" for a in alerts)
+        alert = _find_alert(alerts, "Correlation Breakdown vs SPY")
+        assert alert is not None
+        assert alert.severity in ("info", "warning", "critical")
+        assert alert.category == "spy"
+        assert alert.value == 0.05 or "0.05" in str(alert.value)
 
 
 class TestAlertServiceValuationAlerts:
@@ -561,6 +569,10 @@ class TestExportServiceCSV:
         svc = ExportService()
         csv_out = svc.to_csv(_make_analysis())
         assert "UPST Quant Finance Hub" in csv_out
+        assert isinstance(csv_out, str)
+        assert len(csv_out) > 200
+        # Should contain date/time info
+        assert "202" in csv_out  # year prefix in timestamp
 
     def test_csv_contains_price(self):
         svc = ExportService()
@@ -899,6 +911,13 @@ class TestSchedulerService:
             with patch.dict("sys.modules", {"backend.config.settings": MagicMock(settings=mock_settings)}):
                 await svc.start(MagicMock())
         assert svc._running is False
+        assert len(svc._tasks) == 0
+        assert isinstance(svc._tasks, dict)
+        # Status should reflect disabled state
+        status = svc.status()
+        assert status["running"] is False
+        assert status["tasks"] == []
+        assert isinstance(status["last_run"], dict)
 
     @pytest.mark.asyncio
     async def test_stop_clears_tasks(self):

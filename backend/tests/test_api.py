@@ -131,12 +131,19 @@ async def test_quote_quality_is_numeric(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_quote_response_time_reasonable(client: AsyncClient):
-    """Quote endpoint returns without hanging."""
+    """Quote endpoint returns without hanging and has valid structure."""
     resp = await client.get("/api/v1/quote")
     assert resp.status_code == 200
     body = resp.json()
     assert isinstance(body, dict)
     assert "data" in body
+    assert "source" in body
+    assert "quality" in body
+    assert isinstance(body["source"], str)
+    assert isinstance(body["quality"], (int, float))
+    assert 0 <= body["quality"] <= 1.0
+    assert isinstance(body["data"], dict)
+    assert body["data"]["price"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -618,7 +625,16 @@ async def test_news_custom_params(client: AsyncClient):
     assert resp.status_code == 200
     body = resp.json()
     assert "data" in body
+    assert "source" in body
     assert isinstance(body["data"], list)
+    assert isinstance(body["source"], str)
+    assert len(body["data"]) <= 5
+    # Verify articles have expected structure
+    if len(body["data"]) > 0:
+        article = body["data"][0]
+        assert isinstance(article, dict)
+        assert "headline" in article or "title" in article
+        assert "sentiment" in article or "sentiment_score" in article
 
 
 @pytest.mark.asyncio

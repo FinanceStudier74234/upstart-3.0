@@ -380,6 +380,12 @@ class TestMockShortAdapter:
         adapter = MockShortAdapter()
         env = await adapter.get_stock_loan("UPST")
         assert 40 <= env.data["utilization"] <= 95
+        assert isinstance(env.data["utilization"], (int, float))
+        assert env.data["ticker"] == "UPST"
+        assert env.source == "mock"
+        assert isinstance(env, DataEnvelope)
+        # Utilization should be consistent with shares available
+        assert env.data["shares_available"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -479,6 +485,10 @@ class TestMockFundamentalAdapter:
         env = await adapter.get_financials("UPST")
         for q in env.data:
             assert q["revenue"] > 0
+            assert isinstance(q["revenue"], (int, float))
+            assert q["ticker"] == "UPST"
+            assert 0 <= q["gross_margin"] <= 1.0
+            assert isinstance(q["eps_diluted"], float)
 
     async def test_get_earnings_returns_releases(self):
         adapter = MockFundamentalAdapter()
