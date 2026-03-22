@@ -757,6 +757,32 @@ class TestARIMAForecastEngine:
         assert result.point_forecast is not None or result.selected_order is not None
 
 
+class TestIntradayEngine:
+    def test_analyze(self):
+        from backend.engines.intraday import IntradayEngine
+        import datetime as dt
+        bars = []
+        price = 70.0
+        base_time = dt.datetime(2026, 3, 22, 9, 30, tzinfo=dt.timezone.utc)
+        for i in range(100):
+            ret = np.random.normal(0, 0.002)
+            price *= (1 + ret)
+            bars.append({
+                "bar_time": base_time + dt.timedelta(minutes=i),
+                "open": round(price * 0.999, 2),
+                "high": round(price * 1.005, 2),
+                "low": round(price * 0.995, 2),
+                "close": round(price, 2),
+                "volume": int(np.random.uniform(50000, 200000)),
+            })
+        result = IntradayEngine().analyze(bars, daily_atr=3.0, prev_close=70.0)
+        assert result.vwap is not None and result.vwap > 0
+        assert result.orb_15m_high is not None
+        assert result.intraday_regime in ("trend", "range", "chop")
+        assert result.point_of_control is not None
+        assert result.n_bars == 100
+
+
 class TestVolSurfaceEngine:
     def test_fit(self):
         from backend.engines.vol_surface import VolSurfaceEngine
