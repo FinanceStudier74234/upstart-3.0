@@ -49,11 +49,19 @@ class TestTechnicalEngine:
         assert snap.volatility_regime in ("compressed", "normal", "expanded")
         assert len(snap.sma) > 0
         assert len(snap.ema) > 0
+        assert snap.macd_histogram is not None
+        assert snap.adx is not None and snap.adx >= 0
+        assert snap.stochastic_k is not None and 0 <= snap.stochastic_k <= 100
+        assert len(snap.support_levels) >= 0
+        assert len(snap.resistance_levels) >= 0
+        assert snap.bollinger_pct_b is not None
 
     def test_empty_df(self):
         from backend.engines.technical import TechnicalEngine
         snap = TechnicalEngine().analyze(pd.DataFrame(), "UPST")
         assert snap.price == 0.0
+        assert snap.rsi is None or snap.rsi == 0
+        assert snap.technical_strength_score == 0 or snap.technical_strength_score is not None
 
 
 # ── Options Engine ──
@@ -62,20 +70,38 @@ class TestOptionsEngine:
     def test_analyze_returns_snapshot(self):
         from backend.engines.options import OptionsEngine
         engine = OptionsEngine()
-        # Use mock data structure
+        # Use mock data structure matching engine's expected format
         chain = {
-            "options": [
-                {"strike": 70, "expiry": "2026-04-17", "type": "call",
-                 "bid": 5.0, "ask": 5.5, "volume": 1000, "oi": 5000, "iv": 0.65},
-                {"strike": 70, "expiry": "2026-04-17", "type": "put",
-                 "bid": 4.0, "ask": 4.5, "volume": 800, "oi": 4000, "iv": 0.70},
-                {"strike": 75, "expiry": "2026-04-17", "type": "call",
-                 "bid": 3.0, "ask": 3.5, "volume": 500, "oi": 3000, "iv": 0.60},
+            "contracts": [
+                {"strike": 70, "expiration": "2026-04-17", "option_type": "call",
+                 "bid": 5.0, "ask": 5.5, "volume": 1000, "open_interest": 5000,
+                 "implied_volatility": 0.65},
+                {"strike": 70, "expiration": "2026-04-17", "option_type": "put",
+                 "bid": 4.0, "ask": 4.5, "volume": 800, "open_interest": 4000,
+                 "implied_volatility": 0.70},
+                {"strike": 75, "expiration": "2026-04-17", "option_type": "call",
+                 "bid": 3.0, "ask": 3.5, "volume": 500, "open_interest": 3000,
+                 "implied_volatility": 0.60},
+                {"strike": 60, "expiration": "2026-04-17", "option_type": "put",
+                 "bid": 1.0, "ask": 1.5, "volume": 200, "open_interest": 1500,
+                 "implied_volatility": 0.80},
+                {"strike": 80, "expiration": "2026-05-15", "option_type": "call",
+                 "bid": 2.0, "ask": 2.5, "volume": 300, "open_interest": 2000,
+                 "implied_volatility": 0.55},
+                {"strike": 65, "expiration": "2026-05-15", "option_type": "put",
+                 "bid": 3.0, "ask": 3.5, "volume": 400, "open_interest": 2500,
+                 "implied_volatility": 0.72},
             ],
             "underlying_price": 70.0,
         }
         snap = engine.analyze(chain, "UPST")
         assert 0 <= snap.options_sentiment_score <= 100
+        assert snap.atm_iv is not None and snap.atm_iv > 0
+        assert snap.iv_rank is not None
+        assert snap.put_call_volume_ratio is not None
+        assert isinstance(snap.unusual_calls, list)
+        assert isinstance(snap.unusual_puts, list)
+        assert snap.options_sentiment in ("very_bearish", "bearish", "neutral", "bullish", "very_bullish")
 
 
 # ── Short Engine ──
@@ -84,12 +110,24 @@ class TestShortEngine:
     def test_analyze_returns_snapshot(self):
         from backend.engines.short import ShortEngine
         engine = ShortEngine()
-        short_data = {"short_interest": 15_000_000, "avg_volume": 8_000_000, "float_shares": 80_000_000}
-        loan_data = {"fee_rate": 5.0, "available": 500_000, "utilization": 85}
+        short_data = {
+            "short_interest": 15_000_000, "avg_volume": 8_000_000,
+            "float_shares": 80_000_000, "short_pct_float": 18.75,
+            "days_to_cover": 1.875,
+        }
+        loan_data = {"cost_to_borrow": 5.0, "shares_available": 500_000, "utilization": 85}
         snap = engine.analyze(short_data, loan_data, {}, {}, 70.0)
         assert 0 <= snap.squeeze_risk_score <= 100
         assert snap.short_decision is not None
         assert isinstance(snap.do_not_short_flag, bool)
+        assert snap.short_pct_float is not None
+        assert snap.days_to_cover is not None
+        assert snap.short_decision in (
+            "short_now", "short_rally", "short_breakdown", "add_short",
+            "cover_short", "avoid_short", "use_puts", "use_spreads",
+            "no_bearish_trade", "no_action",
+        )
+        assert snap.crowding_score is not None
 
 
 # ── SPY Beta Engine ──
@@ -104,6 +142,10 @@ class TestSPYBetaEngine:
         assert snap.beta is not None
         assert snap.correlation is not None
         assert 0 <= snap.relative_strength_score <= 100
+        assert snap.alpha_annualized is not None
+        assert snap.pct_market_driven is not None and 0 <= snap.pct_market_driven <= 100
+        assert snap.upside_capture is not None
+        assert snap.downside_capture is not None
 
 
 # ── Scoring Engine ──
@@ -138,6 +180,16 @@ class TestTradeDecisionEngine:
         assert rec.action is not None
         assert rec.confidence in ("low", "moderate", "high")
         assert rec.explanation != ""
+        assert rec.vehicle is not None
+        assert rec.entry_price is not None and rec.entry_price > 0
+        # target/stop/R:R may be None when confidence is "low" (HOLD)
+        if rec.confidence in ("moderate", "high"):
+            assert rec.target_price is not None
+            assert rec.stop_price is not None
+            assert rec.reward_risk_ratio is not None
+        assert hasattr(rec, "target_price")
+        assert hasattr(rec, "stop_price")
+        assert hasattr(rec, "reward_risk_ratio")
 
 
 # ── Forecast Engine ──
@@ -152,6 +204,9 @@ class TestForecastEngine:
         assert result.ensemble_lower <= result.ensemble_point <= result.ensemble_upper
         assert 0 <= result.confidence_score <= 100
         assert len(result.individual_forecasts) >= 3
+        for model in result.individual_forecasts:
+            assert model.model_name is not None and model.model_name != ""
+            assert model.point_estimate is not None and model.point_estimate > 0
 
 
 # ── Risk Engine ──
@@ -181,6 +236,12 @@ class TestBacktestEngine:
         result = engine.run(df, signals, strategy_name="test")
         assert result.strategy_name == "test"
         assert isinstance(result.equity_curve, list)
+        assert result.total_return is not None
+        assert result.sharpe_ratio is not None
+        assert result.max_drawdown is not None and result.max_drawdown <= 0
+        assert result.win_rate is not None and 0 <= result.win_rate <= 100
+        assert len(result.equity_curve) > 0
+        assert result.total_trades >= 0
 
 
 # ── Valuation Engine ──
@@ -193,6 +254,10 @@ class TestValuationEngine:
         assert snap.fair_value_base is not None
         assert snap.fair_value_bull > snap.fair_value_base > snap.fair_value_bear
         assert 0 <= snap.valuation_attractiveness_score <= 100
+        assert snap.ev_revenue is not None
+        assert snap.fcf_yield is not None
+        assert snap.upside_to_fair is not None
+        assert len(snap.peer_multiples) > 0
 
 
 # ── Funding Analysis Engine ──
@@ -205,6 +270,10 @@ class TestFundingAnalysisEngine:
         assert len(snap.facilities) > 0
         assert snap.partner_count > 0
         assert 0 <= snap.funding_strength_score <= 100
+        assert snap.utilization_pct is not None
+        assert snap.months_coverage is not None
+        for fac in snap.facilities:
+            assert fac.name is not None and fac.name != ""
 
 
 # ── Origination Analysis Engine ──
@@ -216,6 +285,10 @@ class TestOriginationAnalysisEngine:
         assert snap.quarterly_volume > 0
         assert snap.product_count > 0
         assert 0 <= snap.origination_momentum_score <= 100
+        assert snap.monthly_run_rate is not None
+        assert snap.qoq_growth is not None
+        assert snap.yoy_growth is not None
+        assert snap.personal_pct is not None or snap.auto_pct is not None  # product_mix exists
 
 
 # ── Factor Engine ──
@@ -227,6 +300,11 @@ class TestFactorEngine:
         assert snap.market_beta is not None
         assert snap.style in ("growth", "value", "blend")
         assert snap.systematic_risk_pct is not None
+        assert snap.size_loading is not None
+        assert snap.value_loading is not None
+        assert snap.momentum_loading is not None
+        assert snap.size in ("mega", "large", "mid", "small", "micro", "mid_cap")
+        assert snap.systematic_risk_pct + snap.idiosyncratic_risk_pct == pytest.approx(100)
 
 
 # ── Stress Engine ──
@@ -238,6 +316,10 @@ class TestStressEngine:
         assert len(snap.scenarios) > 0
         assert snap.runway_months > 0
         assert 0 <= snap.balance_sheet_health_score <= 100
+        for scenario in snap.scenarios:
+            assert scenario.name is not None and scenario.name != ""
+            assert isinstance(scenario.survives, bool)
+        assert snap.cash_and_equivalents is not None and snap.cash_and_equivalents > 0
 
 
 # ── Reflexivity Engine ──
@@ -250,6 +332,10 @@ class TestReflexivityEngine:
         assert len(snap.feedback_loops) > 0
         assert 0 <= snap.reflexivity_score <= 100
         assert snap.return_autocorrelation is not None
+        for loop in snap.feedback_loops:
+            assert loop.name is not None and loop.name != ""
+        assert snap.herding_score is not None
+        assert snap.regime_transition_probability is not None
 
 
 # ── Execution Engine ──
@@ -261,6 +347,10 @@ class TestExecutionEngine:
         assert snap.bid_ask_spread is not None
         assert snap.est_slippage_100k is not None
         assert 0 <= snap.liquidity_score <= 100
+        assert snap.avg_daily_volume is not None and snap.avg_daily_volume > 0
+        assert snap.optimal_algo is not None
+        assert snap.stop_run_risk is not None
+        assert snap.stop_run_risk in ("low", "medium", "high")
 
 
 # ── Data Governance Engine ──
@@ -271,6 +361,13 @@ class TestDataGovernanceEngine:
         snap = DataGovernanceEngine().analyze()
         assert len(snap.sources) > 0
         assert 0 <= snap.data_governance_score <= 100
+        for src in snap.sources:
+            assert src.name is not None and src.name != ""
+            assert src.source is not None
+            assert src.freshness in ("live", "stale", "expired", "unknown")
+        assert snap.overall_quality_score is not None
+        assert snap.overall_coverage_pct is not None
+        assert snap.overall_freshness_score is not None
 
 
 # ── Catalyst Engine ──
@@ -282,6 +379,11 @@ class TestCatalystEngine:
         assert len(snap.upcoming) > 0
         assert snap.next_earnings_date is not None
         assert 0 <= snap.binary_event_risk <= 100
+        assert snap.days_to_earnings is not None
+        assert snap.catalysts_next_30d > 0 or snap.catalysts_next_30d == 0
+        for cat in snap.upcoming:
+            assert cat.name is not None and cat.name != ""
+            assert cat.category in ("earnings", "product", "regulatory", "macro", "funding", "partnership")
 
 
 # ── Overfitting Engine ──
@@ -292,6 +394,10 @@ class TestOverfittingEngine:
         snap = OverfittingEngine().analyze()
         assert snap.risk_level in ("low", "medium", "high", "critical")
         assert 0 <= snap.overfitting_risk_score <= 100
+        assert snap.is_sharpe is not None
+        assert snap.oos_sharpe is not None
+        assert snap.sharpe_decay_pct is not None
+        assert snap.pbo is not None
 
 
 # ── Probability Engine ──
@@ -304,6 +410,9 @@ class TestProbabilityEngine:
         assert snap.prob_up_1w is not None
         assert 0 <= snap.prob_up_1w <= 1
         assert snap.cone_1m is not None and len(snap.cone_1m) > 0
+        assert snap.prob_up_1m is not None and 0 <= snap.prob_up_1m <= 1
+        assert snap.prob_above_target is not None
+        assert snap.prob_below_stop is not None
 
 
 # ── Behavioral Engine ──
@@ -332,6 +441,11 @@ class TestNewsEngine:
         assert -1 <= snap.avg_sentiment <= 1
         assert snap.sentiment_label in ("very_bearish", "bearish", "neutral", "bullish", "very_bullish")
         assert 0 <= snap.news_sentiment_score <= 100
+        assert snap.articles is not None and len(snap.articles) > 0
+        for article in snap.articles:
+            assert article.headline is not None and article.headline != ""
+        assert isinstance(snap.policy_risk, bool)
+        assert isinstance(snap.regulatory_risk, bool)
 
 
 # ── Macro Engine ──
@@ -380,6 +494,8 @@ class TestScenarioEngine:
         assert 0 <= result.probability_down <= 1
         assert result.confidence > 0
         assert result.adjusted_trade_recommendation is not None
+        assert result.fragility is not None
+        assert result.probability_up + result.probability_down <= 1.01
 
     def test_scenario_with_spy_shock(self):
         from backend.engines.scenario import ScenarioEngine, ScenarioInputs
@@ -409,8 +525,10 @@ class TestPriceActionBot:
         assert out.is_simulation is True
         assert out.bot_name == "price_action_simulation"
         assert out.confidence > 0
+        assert out.bot_name is not None
         assert "percentiles" in out.results
         assert len(out.paths) > 0
+        assert len(out.results) >= 2
 
 
 class TestSqueezeBot:
@@ -423,6 +541,9 @@ class TestSqueezeBot:
         assert out.is_simulation is True
         assert "scenarios" in out.results
         assert out.confidence > 0
+        assert out.bot_name is not None
+        assert "expected_price_with_squeeze_risk" in out.results
+        assert len(out.results) >= 2
 
 
 class TestMacroShockBot:
@@ -446,6 +567,10 @@ class TestFundingStressBot:
         out = asyncio.run(bot.run(inp))
         assert out.is_simulation is True
         assert "scenarios" in out.results
+        assert len(out.results["scenarios"]) > 0
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert "current_capacity_mm" in out.results or "concentration_risk" in out.results
 
 
 class TestStrategyBot:
@@ -482,7 +607,11 @@ class TestOptionsReactionBot:
                        scenario_params={"price_change_pct": -10, "iv_change_pct": 20})
         out = asyncio.run(bot.run(inp))
         assert out.is_simulation is True
-        assert "call_repricing" in out.results or "results" in dir(out)
+        assert "calls" in out.results
+        assert "puts" in out.results
+        assert out.confidence > 0
+        assert out.bot_name is not None
+        assert "greeks_summary" in out.results
 
 
 class TestTradeDecisionBot:
