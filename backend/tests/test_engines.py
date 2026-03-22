@@ -777,7 +777,7 @@ class TestIntradayEngine:
             })
         result = IntradayEngine().analyze(bars, daily_atr=3.0, prev_close=70.0)
         assert result.vwap is not None and result.vwap > 0
-        assert result.orb_15m_high is not None
+        assert result.orb_15_high is not None
         assert result.intraday_regime in ("trend", "range", "chop")
         assert result.point_of_control is not None
         assert result.n_bars == 100
