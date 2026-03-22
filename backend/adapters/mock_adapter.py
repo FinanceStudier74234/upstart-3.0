@@ -66,7 +66,7 @@ class MockMarketAdapter(BaseMarketAdapter):
         closes = _gbm_path(base, 0.0, sigma, days)
         records = []
         cur = start
-        for i, c in enumerate(closes):
+        for i, c in enumerate(closes[1:]):  # Skip s0; iterate over generated steps only
             if cur.weekday() < 5:  # Skip weekends
                 h = round(c * _rng.uniform(1.0, 1.04), 2)
                 l = round(c * _rng.uniform(0.96, 1.0), 2)
@@ -221,7 +221,7 @@ class MockFundamentalAdapter(BaseFundamentalAdapter):
             rev = round(base_rev * growth)
             quarters.append({
                 "ticker": ticker,
-                "period_type": f"Q{(4 - q % 4)}",
+                "period_type": f"Q{((3 - q) % 4) + 1}",
                 "fiscal_year": 2025 - q // 4,
                 "revenue": rev,
                 "fee_revenue": round(rev * 0.85),

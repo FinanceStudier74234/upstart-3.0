@@ -61,7 +61,7 @@ class TestTechnicalEngine:
         snap = TechnicalEngine().analyze(pd.DataFrame(), "UPST")
         assert snap.price == 0.0
         assert snap.rsi is None or snap.rsi == 0
-        assert snap.technical_strength_score == 0 or snap.technical_strength_score is not None
+        assert snap.technical_strength_score >= 0
 
 
 # ── Options Engine ──
@@ -380,7 +380,7 @@ class TestCatalystEngine:
         assert snap.next_earnings_date is not None
         assert 0 <= snap.binary_event_risk <= 100
         assert snap.days_to_earnings is not None
-        assert snap.catalysts_next_30d > 0 or snap.catalysts_next_30d == 0
+        assert snap.catalysts_next_30d >= 0
         for cat in snap.upcoming:
             assert cat.name is not None and cat.name != ""
             assert cat.category in ("earnings", "product", "regulatory", "macro", "funding", "partnership")
@@ -495,7 +495,7 @@ class TestScenarioEngine:
         assert result.confidence > 0
         assert result.adjusted_trade_recommendation is not None
         assert result.fragility is not None
-        assert result.probability_up + result.probability_down <= 1.01
+        assert result.probability_up + result.probability_down <= 1.0 + 1e-6
 
     def test_scenario_with_spy_shock(self):
         from backend.engines.scenario import ScenarioEngine, ScenarioInputs

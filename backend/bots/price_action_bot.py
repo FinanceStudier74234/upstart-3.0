@@ -19,7 +19,7 @@ class PriceActionBot(BaseBot):
         price = input.current_price or 70.0
         params = input.scenario_params
         n_paths = params.get("n_paths", 1000)
-        horizon = params.get("horizon_days", 63)
+        horizon = max(1, params.get("horizon_days", 63))
         mu = params.get("drift", 0.0)
         sigma = params.get("volatility", 0.65)
         beta = params.get("beta", 1.5)

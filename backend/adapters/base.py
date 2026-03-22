@@ -22,7 +22,7 @@ class DataEnvelope:
     warnings: list[str] = field(default_factory=list)
 
     def mark_stale(self, threshold_seconds: int) -> None:
-        if self.freshness_seconds and self.freshness_seconds > threshold_seconds:
+        if self.freshness_seconds is not None and self.freshness_seconds > threshold_seconds:
             self.is_stale = True
             self.quality_score = max(0.0, self.quality_score - 0.3)
             self.warnings.append(f"Data stale: {self.freshness_seconds}s > {threshold_seconds}s")

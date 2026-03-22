@@ -188,11 +188,13 @@ class Orchestrator:
             "short": short_env.source,
             "news": news_env.source,
             "fundamentals": financials_env.source,
-            "macro": macro_env.source,
+            "macro": macro_env.source if macro_env is not None else "none",
         }
         for env in [upst_quote, upst_bars_env, options_env, short_env,
-                     news_env, financials_env, earnings_env, macro_env]:
+                     news_env, financials_env, earnings_env]:
             warnings.extend(env.warnings)
+        if macro_env is not None:
+            warnings.extend(macro_env.warnings)
 
         # Parse price
         if upst_quote.data:
@@ -361,7 +363,9 @@ class Orchestrator:
             analysis.news_intelligence = self._snapshot_to_dict(ni_snap)
 
         # Learning
-        analysis.learning = self.learning_engine.get_report()
+        learning_report = self._safe_engine_call("learning", self.learning_engine.get_report)
+        if learning_report:
+            analysis.learning = learning_report
 
         # ── 7. Scores (now with all engine data) ──
         scores = self._safe_engine_call(
@@ -549,10 +553,11 @@ class Orchestrator:
                     # Convert numpy types to Python natives
                     arr = v.tolist()
                     if isinstance(arr, list):
-                        # Preserve small arrays (probability cones, paths, etc.)
+                        # Preserve small arrays; truncate large ones
                         if len(arr) <= 500:
                             result[k] = arr
-                        # Skip very large arrays to keep response size manageable
+                        else:
+                            result[k] = arr[:500]
                     else:
                         # Scalar numpy values (np.float64, np.int64, etc.)
                         result[k] = arr

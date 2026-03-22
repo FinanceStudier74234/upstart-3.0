@@ -5,7 +5,7 @@ API Routes — RESTful endpoints exposing all platform capabilities.
 from __future__ import annotations
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.services.orchestrator import orchestrator
 from backend.services.alert_service import alert_service
@@ -36,7 +36,7 @@ async def full_analysis():
 
 # ── Individual Components ──
 @router.get("/quote")
-async def quote(ticker: str = "UPST"):
+async def quote(ticker: str = Query("UPST", max_length=10, pattern=r"^[A-Z]{1,5}$")):
     from backend.adapters.provider import data_provider
     env = await data_provider.get_quote(ticker)
     return {"data": env.data, "source": env.source, "quality": env.quality_score}
@@ -290,10 +290,10 @@ async def run_scenario(req: ScenarioRequest):
 # ── Backtest ──
 class BacktestRequest(BaseModel):
     strategy: str = "technical_signals"
-    days: int = 365
-    position_size_pct: float = 10.0
-    stop_loss_pct: float = 5.0
-    take_profit_pct: float = 10.0
+    days: int = Field(default=365, ge=1, le=3650)
+    position_size_pct: float = Field(default=10.0, ge=0.1, le=100.0)
+    stop_loss_pct: float = Field(default=5.0, ge=0.1, le=50.0)
+    take_profit_pct: float = Field(default=10.0, ge=0.1, le=100.0)
 
 
 @router.post("/backtest")
@@ -305,7 +305,7 @@ async def run_backtest(req: BacktestRequest):
 # ── Simulation Bots ──
 class BotRequest(BaseModel):
     bot_name: str
-    params: dict = {}
+    params: dict = Field(default_factory=dict)
 
 
 @router.post("/bot")
@@ -436,6 +436,8 @@ async def websocket_endpoint(websocket: WebSocket):
             if data == "ping":
                 await websocket.send_text('{"event":"pong"}')
     except WebSocketDisconnect:
+        await ws_manager.disconnect(websocket)
+    except Exception:
         await ws_manager.disconnect(websocket)
 
 

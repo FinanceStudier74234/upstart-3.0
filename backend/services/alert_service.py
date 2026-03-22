@@ -140,7 +140,7 @@ class AlertService:
 
         # Extreme IV
         atm_iv = options.get("atm_iv", 0)
-        if atm_iv and atm_iv > 1.0:
+        if atm_iv is not None and atm_iv > 1.0:
             alerts.append(self._make_alert(
                 now, "critical", "options",
                 "Extreme Implied Volatility",
@@ -150,7 +150,7 @@ class AlertService:
 
         # IV spike detection (rapid IV increase)
         iv_percentile = options.get("iv_percentile", 50)
-        if iv_percentile and iv_percentile > 90:
+        if iv_percentile is not None and iv_percentile > 90:
             alerts.append(self._make_alert(
                 now, "warning", "options",
                 "IV at Extreme Percentile",
@@ -160,14 +160,14 @@ class AlertService:
 
         # Elevated put/call ratio
         pc_ratio = options.get("put_call_volume_ratio", 0)
-        if pc_ratio and pc_ratio > 2.0:
+        if pc_ratio is not None and pc_ratio > 2.0:
             alerts.append(self._make_alert(
                 now, "warning", "options",
                 "Elevated Put/Call Ratio",
                 f"P/C ratio at {pc_ratio:.2f} — heavy put buying detected",
                 value=pc_ratio, threshold=2.0,
             ))
-        elif pc_ratio and pc_ratio < 0.4:
+        elif pc_ratio is not None and pc_ratio < 0.4:
             alerts.append(self._make_alert(
                 now, "info", "options",
                 "Extremely Low Put/Call Ratio",
@@ -212,7 +212,7 @@ class AlertService:
         short = analysis.get("short", {})
 
         squeeze = short.get("squeeze_risk_score", 0)
-        if squeeze and squeeze > 75:
+        if squeeze is not None and squeeze > 75:
             alerts.append(self._make_alert(
                 now, "critical", "short",
                 "Squeeze Risk Elevated",
@@ -230,7 +230,7 @@ class AlertService:
 
         # Short interest spike
         si_change = short.get("short_interest_change_pct", 0)
-        if si_change and abs(si_change) > 15:
+        if si_change is not None and abs(si_change) > 15:
             direction = "increased" if si_change > 0 else "decreased"
             alerts.append(self._make_alert(
                 now, "warning", "short",
@@ -241,7 +241,7 @@ class AlertService:
 
         # Borrow cost spike
         borrow_cost = short.get("cost_to_borrow", 0)
-        if borrow_cost and borrow_cost > 30:
+        if borrow_cost is not None and borrow_cost > 30:
             alerts.append(self._make_alert(
                 now, "warning", "short",
                 "Borrow Cost Spike",
@@ -251,7 +251,7 @@ class AlertService:
 
         # Utilization extreme
         utilization = short.get("utilization", 0)
-        if utilization and utilization > 90:
+        if utilization is not None and utilization > 90:
             alerts.append(self._make_alert(
                 now, "critical", "short",
                 "Share Utilization Extreme",
@@ -303,7 +303,7 @@ class AlertService:
 
         # Concentration risk
         concentration = funding.get("concentration_risk", 0)
-        if concentration and concentration > 40:
+        if concentration is not None and concentration > 40:
             alerts.append(self._make_alert(
                 now, "warning", "funding",
                 "Funding Concentration Risk",
@@ -331,7 +331,7 @@ class AlertService:
 
         # Origination collapse
         yoy_growth = orig.get("yoy_growth", 0)
-        if yoy_growth and yoy_growth < -30:
+        if yoy_growth is not None and yoy_growth < -30:
             alerts.append(self._make_alert(
                 now, "critical", "origination",
                 "Origination Volume Collapse",
@@ -358,7 +358,7 @@ class AlertService:
 
         # Yield curve inversion
         yield_curve = macro.get("yield_curve_slope", 0)
-        if yield_curve and yield_curve < -0.2:
+        if yield_curve is not None and yield_curve < -0.2:
             alerts.append(self._make_alert(
                 now, "warning", "macro",
                 "Yield Curve Deeply Inverted",
@@ -368,7 +368,7 @@ class AlertService:
 
         # Credit spread widening
         hy_spread = macro.get("hy_spread", 0)
-        if hy_spread and hy_spread > 500:
+        if hy_spread is not None and hy_spread > 500:
             alerts.append(self._make_alert(
                 now, "critical", "macro",
                 "Credit Spreads Widening",
@@ -395,14 +395,14 @@ class AlertService:
 
         # Extreme cheapness
         attractiveness = val.get("valuation_attractiveness_score", 50)
-        if attractiveness and attractiveness > 85:
+        if attractiveness is not None and attractiveness > 85:
             alerts.append(self._make_alert(
                 now, "info", "valuation",
                 "Valuation Extremely Attractive",
                 f"Valuation attractiveness at {attractiveness:.0f}/100 — significantly below fair value",
                 value=attractiveness, threshold=85,
             ))
-        elif attractiveness and attractiveness < 15:
+        elif attractiveness is not None and attractiveness < 15:
             alerts.append(self._make_alert(
                 now, "warning", "valuation",
                 "Valuation Extremely Stretched",
@@ -444,7 +444,7 @@ class AlertService:
         risk = analysis.get("risk", {})
 
         max_dd = risk.get("max_drawdown", 0)
-        if max_dd and abs(max_dd) > 30:
+        if max_dd is not None and abs(max_dd) > 30:
             alerts.append(self._make_alert(
                 now, "warning", "risk",
                 "Large Historical Drawdown",
@@ -454,7 +454,7 @@ class AlertService:
 
         # Risk of ruin
         risk_of_ruin = risk.get("risk_of_ruin", 0)
-        if risk_of_ruin and risk_of_ruin > 0.10:
+        if risk_of_ruin is not None and risk_of_ruin > 0.10:
             alerts.append(self._make_alert(
                 now, "critical", "risk",
                 "Risk of Ruin Elevated",
@@ -472,7 +472,7 @@ class AlertService:
 
         # Beta regime shift
         rolling_beta = spy.get("rolling_beta", 1.5)
-        if rolling_beta and abs(rolling_beta - 1.5) > 0.5:
+        if rolling_beta is not None and abs(rolling_beta - 1.5) > 0.5:
             alerts.append(self._make_alert(
                 now, "warning", "spy",
                 "Beta Regime Shift",
@@ -482,7 +482,7 @@ class AlertService:
 
         # SPY divergence
         relative_divergence = spy.get("relative_strength_divergence", 0)
-        if relative_divergence and abs(relative_divergence) > 2.0:
+        if relative_divergence is not None and abs(relative_divergence) > 2.0:
             direction = "outperforming" if relative_divergence > 0 else "underperforming"
             alerts.append(self._make_alert(
                 now, "info", "spy",
@@ -521,7 +521,7 @@ class AlertService:
         # Forecast confidence collapse
         forecast = analysis.get("forecast", {})
         conf = forecast.get("confidence_score", 50)
-        if conf and conf < 20:
+        if conf is not None and conf < 20:
             alerts.append(self._make_alert(
                 now, "warning", "model",
                 "Forecast Confidence Collapse",

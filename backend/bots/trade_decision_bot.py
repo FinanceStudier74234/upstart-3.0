@@ -127,4 +127,10 @@ class TradeDecisionBot(BaseBot):
         s = scores.get(name)
         if s is None:
             return default
-        return s.value if hasattr(s, "value") else s.get("value", default)
+        if hasattr(s, "value"):
+            return s.value
+        if isinstance(s, dict):
+            return s.get("value", default)
+        if isinstance(s, (int, float)):
+            return s
+        return default

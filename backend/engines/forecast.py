@@ -199,8 +199,8 @@ class ForecastEngine:
     ) -> ForecastResult:
         """Momentum / trend-following forecast."""
         # Use 20-day and 50-day momentum
-        mom_20 = float(close.iloc[-1] / close.iloc[-21] - 1) if len(close) > 21 else 0
-        mom_50 = float(close.iloc[-1] / close.iloc[-51] - 1) if len(close) > 51 else 0
+        mom_20 = float(close.iloc[-1] / close.iloc[-21] - 1) if len(close) >= 21 else 0
+        mom_50 = float(close.iloc[-1] / close.iloc[-51] - 1) if len(close) >= 51 else 0
         avg_mom = (mom_20 * 0.6 + mom_50 * 0.4)
 
         # Project momentum forward with decay
@@ -217,8 +217,8 @@ class ForecastEngine:
             model_name="momentum_trend",
             point_estimate=projected,
             lower_bound=lower, upper_bound=upper,
-            probability_up=round(0.5 + avg_mom * 2, 4) if avg_mom > 0 else round(max(0.1, 0.5 + avg_mom * 2), 4),
-            probability_down=round(0.5 - avg_mom * 2, 4) if avg_mom > 0 else round(min(0.9, 0.5 - avg_mom * 2), 4),
+            probability_up=round(min(0.95, max(0.05, 0.5 + avg_mom * 2)), 4),
+            probability_down=round(min(0.95, max(0.05, 0.5 - avg_mom * 2)), 4),
             assumptions={"mom_20d": round(mom_20, 4), "mom_50d": round(mom_50, 4),
                           "decay": round(decay, 4)},
             explanation=f"Momentum model: 20d={mom_20:.2%}, 50d={mom_50:.2%}",

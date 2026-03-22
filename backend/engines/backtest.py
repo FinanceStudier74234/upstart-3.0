@@ -181,7 +181,7 @@ class BacktestEngine:
 
         result.total_return = round((equity[-1] / initial_capital - 1) * 100, 2)
         days = (result.end_date - result.start_date).days if result.start_date and result.end_date else 365
-        result.annualized_return = round(result.total_return * 365 / max(days, 1), 2)
+        result.annualized_return = round(((1 + result.total_return / 100) ** (365 / max(days, 1)) - 1) * 100, 2)
 
         result.win_rate = round(len(wins) / len(trades) * 100, 2) if trades else 0
         result.avg_win = round(np.mean(wins), 2) if wins else 0

@@ -11,6 +11,7 @@ Supports all institutional export formats:
 from __future__ import annotations
 
 import csv
+import html as html_mod
 import io
 import json
 import datetime as dt
@@ -162,7 +163,7 @@ class ExportService:
             val = data.get("value", "?") if isinstance(data, dict) else data
             expl = data.get("explanation", "") if isinstance(data, dict) else ""
             color = "#22c55e" if isinstance(val, (int, float)) and val > 60 else "#ef4444" if isinstance(val, (int, float)) and val < 40 else "#f59e0b"
-            score_rows += f'<tr><td>{name}</td><td style="color:{color};font-weight:bold">{val}</td><td>{expl}</td></tr>\n'
+            score_rows += f'<tr><td>{html_mod.escape(str(name))}</td><td style="color:{color};font-weight:bold">{html_mod.escape(str(val))}</td><td>{html_mod.escape(str(expl))}</td></tr>\n'
 
         # Build section blocks for each analysis domain
         section_blocks = ""
@@ -185,7 +186,7 @@ class ExportService:
                 rows = ""
                 for k, v in section_data.items():
                     if not isinstance(v, (list, dict)):
-                        rows += f"<tr><td>{k}</td><td>{v}</td></tr>\n"
+                        rows += f"<tr><td>{html_mod.escape(str(k))}</td><td>{html_mod.escape(str(v))}</td></tr>\n"
                 if rows:
                     section_blocks += f"""
                     <div class="section">
