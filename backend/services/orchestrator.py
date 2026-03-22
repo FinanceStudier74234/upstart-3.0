@@ -190,7 +190,7 @@ class Orchestrator:
             "fundamentals": financials_env.source,
             "macro": macro_env.source if macro_env is not None else "none",
         }
-        for env in [upst_quote, upst_bars_env, options_env, short_env,
+        for env in [upst_quote, upst_bars_env, spy_bars_env, options_env, short_env,
                      news_env, financials_env, earnings_env]:
             warnings.extend(env.warnings)
         if macro_env is not None:
@@ -459,7 +459,7 @@ class Orchestrator:
 
     async def run_scenario(self, params: dict) -> dict:
         """Run interactive scenario lab."""
-        inputs = ScenarioInputs(**{k: v for k, v in params.items() if hasattr(ScenarioInputs, k)})
+        inputs = ScenarioInputs(**{k: v for k, v in params.items() if k in ScenarioInputs.__dataclass_fields__})
 
         upst_quote = await data_provider.get_quote("UPST")
         price = upst_quote.data.get("price", 70.0) if upst_quote.data else 70.0

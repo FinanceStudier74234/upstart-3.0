@@ -94,8 +94,8 @@ class StrategyBot(BaseBot):
     def _bearish_strategies(self, price, iv, dte):
         t = dte / 365
         put_strike = round(price * 0.95 / 2.5) * 2.5
-        spread_long = round(price * 1.05 / 2.5) * 2.5
-        spread_short = round(price * 0.95 / 2.5) * 2.5
+        spread_long = round(price * 0.95 / 2.5) * 2.5   # Buy lower-strike put (OTM)
+        spread_short = round(price * 0.85 / 2.5) * 2.5  # Sell further OTM put
 
         put_price = self._bs_price(price, put_strike, iv, t, "put")
         spread_debit = self._bs_price(price, spread_long, iv, t, "put") - self._bs_price(price, spread_short, iv, t, "put")

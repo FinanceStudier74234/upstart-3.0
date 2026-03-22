@@ -18,7 +18,7 @@ class PriceActionBot(BaseBot):
     async def run(self, input: BotInput) -> BotOutput:
         price = input.current_price or 70.0
         params = input.scenario_params
-        n_paths = params.get("n_paths", 1000)
+        n_paths = max(1, params.get("n_paths", 1000))
         horizon = max(1, params.get("horizon_days", 63))
         mu = params.get("drift", 0.0)
         sigma = params.get("volatility", 0.65)

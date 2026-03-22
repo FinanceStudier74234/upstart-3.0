@@ -23,8 +23,8 @@ class OptionsReactionBot(BaseBot):
         days_elapsed = params.get("days_elapsed", 7)
         base_iv = params.get("base_iv", 0.70)
 
-        new_price = price * (1 + price_change_pct / 100)
-        new_iv = base_iv * (1 + iv_change_pct / 100)
+        new_price = max(0.01, price * (1 + price_change_pct / 100))
+        new_iv = max(0.01, base_iv * (1 + iv_change_pct / 100))
 
         # Simulate repricing for sample strikes
         strikes = [round(price * mult, 2) for mult in [0.80, 0.85, 0.90, 0.95, 1.00, 1.05, 1.10, 1.15, 1.20]]
@@ -118,7 +118,7 @@ class OptionsReactionBot(BaseBot):
 
     def _approx_option_price(self, s, k, vol, t, opt_type):
         """Simplified Black-Scholes approximation."""
-        if t <= 0 or vol <= 0:
+        if t <= 0 or vol <= 0 or s <= 0 or k <= 0:
             if opt_type == "call":
                 return max(0, s - k)
             return max(0, k - s)

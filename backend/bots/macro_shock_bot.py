@@ -96,7 +96,7 @@ class MacroShockBot(BaseBot):
                 "worst_case_price": min(s["projected_price"] for s in scenarios),
                 "best_case_price": max(s["projected_price"] for s in scenarios),
                 "expected_price": round(sum(s["projected_price"] * s["probability"] for s in scenarios) /
-                                       sum(s["probability"] for s in scenarios), 2),
+                                       max(0.01, sum(s["probability"] for s in scenarios)), 2),
             },
             tables=[{"name": "Macro Shock Scenarios", "data": scenarios}],
             assumptions={"beta": beta, "rate_sensitivity": "high", "credit_sensitivity": "high"},

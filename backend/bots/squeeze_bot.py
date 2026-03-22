@@ -73,8 +73,9 @@ class SqueezeBot(BaseBot):
         expected_squeeze = sum(
             s["squeeze_price"] * s["probability"] for s in scenarios
         )
-        no_squeeze_prob = 1 - sum(s["probability"] for s in scenarios)
-        expected_price = round(expected_squeeze + price * no_squeeze_prob, 2)
+        no_squeeze_prob = max(0, 1 - sum(s["probability"] for s in scenarios))
+        total_prob = sum(s["probability"] for s in scenarios) + no_squeeze_prob
+        expected_price = round((expected_squeeze + price * no_squeeze_prob) / total_prob, 2) if total_prob > 0 else round(price, 2)
 
         # Monte Carlo squeeze simulation (500 paths)
         mc_n_paths = 500
