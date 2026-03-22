@@ -151,7 +151,7 @@ class TradeDecisionEngine:
             factors = self._collect_bullish_factors(scores)
         elif composite_val < 35 or bearish_signals > bullish_signals:
             # BEARISH
-            rec = self._bearish_decision(rec, scores, short, options, price, squeeze_val)
+            rec = self._bearish_decision(rec, scores, short, options, technical, price, squeeze_val)
             factors = self._collect_bearish_factors(scores)
         else:
             # NEUTRAL
@@ -209,10 +209,10 @@ class TradeDecisionEngine:
                     )
 
         rec.suggested_position_pct = self._size_position(scores, rec)
-        rec.max_loss_pct = 2.0
+        rec.max_loss_pct = self._compute_max_loss_pct(price, rec.stop_price, rec.suggested_position_pct, long=True)
         return rec
 
-    def _bearish_decision(self, rec, scores, short, options, price, squeeze_val):
+    def _bearish_decision(self, rec, scores, short, options, technical, price, squeeze_val):
         if squeeze_val > 70:
             # High squeeze risk — use options, not direct short
             rec.action = "buy_puts"
@@ -232,15 +232,20 @@ class TradeDecisionEngine:
             rec.explanation = "Moderate bearish conviction. Puts provide defined risk."
 
         if price > 0:
-            atr = price * 0.04
+            atr = technical.get("atr", price * 0.04) if technical else price * 0.04
             rec.target_price = round(price - atr * 3, 2)
             rec.stop_price = round(price + atr * 1.5, 2)
             rec.invalidation_price = rec.stop_price
             if rec.stop_price > price:
                 rec.reward_risk_ratio = round((price - rec.target_price) / (rec.stop_price - price), 2)
+                if rec.reward_risk_ratio > 0:
+                    win_prob = 0.5 + (50 - self._sv(scores, "composite_opportunity")) / 200
+                    rec.expected_value = round(
+                        win_prob * (price - rec.target_price) - (1 - win_prob) * (rec.stop_price - price), 2,
+                    )
 
         rec.suggested_position_pct = self._size_position(scores, rec)
-        rec.max_loss_pct = 2.0
+        rec.max_loss_pct = self._compute_max_loss_pct(price, rec.stop_price, rec.suggested_position_pct, long=False)
         return rec
 
     def _size_position(self, scores, rec) -> float:
@@ -252,6 +257,19 @@ class TradeDecisionEngine:
         frag_adj = max(0.3, 1.0 - rec.fragility_score / 100)
         size = base * quality_adj * frag_adj
         return round(max(1.0, min(10.0, size)), 2)
+
+    @staticmethod
+    def _compute_max_loss_pct(price: float, stop_price: float | None, position_pct: float | None, long: bool) -> float:
+        """Max portfolio loss = stop distance * position size."""
+        if price and price > 0 and stop_price and position_pct and position_pct > 0:
+            if long and stop_price < price:
+                stop_dist = (price - stop_price) / price
+            elif not long and stop_price > price:
+                stop_dist = (stop_price - price) / price
+            else:
+                stop_dist = 0.02  # fallback: 2% stop distance
+            return round(stop_dist * (position_pct / 100) * 100, 2)
+        return round((position_pct or 5.0) * 0.02, 2)  # fallback: 2% stop on position
 
     def _sv(self, scores: dict, name: str) -> float:
         """Safely get score value."""

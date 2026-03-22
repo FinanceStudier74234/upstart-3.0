@@ -191,6 +191,43 @@ class TestTradeDecisionEngine:
         assert hasattr(rec, "stop_price")
         assert hasattr(rec, "reward_risk_ratio")
 
+    def test_bearish_decision_parity(self):
+        """Bearish path must compute EV, use ATR from technical, and have max_loss_pct."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+
+        def make_score(v):
+            return type("S", (), {"value": float(v), "confidence": 0.8})()
+
+        bullish_scores = {k: make_score(v) for k, v in {
+            "composite_opportunity": 75, "technical_strength": 72,
+            "options_sentiment": 65, "short_opportunity": 40,
+            "squeeze_risk": 25, "trade_quality": 68, "positioning_fragility": 30,
+        }.items()}
+        bearish_scores = {k: make_score(v) for k, v in {
+            "composite_opportunity": 28, "technical_strength": 28,
+            "options_sentiment": 30, "short_opportunity": 70,
+            "squeeze_risk": 30, "trade_quality": 65, "positioning_fragility": 25,
+        }.items()}
+        technical = {"atr": 2.5, "rsi": 42.0}
+
+        bull = TradeDecisionEngine().decide(scores=bullish_scores, price=70.0, technical=technical)
+        bear = TradeDecisionEngine().decide(scores=bearish_scores, price=70.0, technical=technical)
+
+        # Both must use ATR from technical dict (target = price ± atr*3)
+        assert bull.target_price == round(70.0 + 2.5 * 3, 2)
+        assert bear.target_price == round(70.0 - 2.5 * 3, 2)
+
+        # Both must compute expected_value
+        assert bull.expected_value is not None
+        assert bear.expected_value is not None
+
+        # max_loss_pct must be derived from actual stop distance, not hardcoded 2.0
+        assert bull.max_loss_pct is not None and bull.max_loss_pct != 2.0
+        assert bear.max_loss_pct is not None and bear.max_loss_pct != 2.0
+
+        # Bearish EV should be positive (positive expected return on a valid short)
+        assert bear.expected_value > 0
+
 
 # ── Forecast Engine ──
 
@@ -242,6 +279,30 @@ class TestBacktestEngine:
         assert result.win_rate is not None and 0 <= result.win_rate <= 100
         assert len(result.equity_curve) > 0
         assert result.total_trades >= 0
+
+    def test_slippage_applied_to_fills(self):
+        """Entry prices must be worse than close (slippage applied), and exit prices too."""
+        from backend.engines.backtest import BacktestEngine
+        import pandas as pd
+        # Fixed price path to make assertions deterministic
+        dates = pd.date_range("2024-01-01", periods=50, freq="B")
+        prices = [70.0 + i * 0.1 for i in range(50)]  # monotonically rising
+        df = pd.DataFrame({
+            "open": prices, "high": [p + 0.5 for p in prices],
+            "low": [p - 0.5 for p in prices], "close": prices,
+            "volume": [1_000_000] * 50,
+        }, index=dates)
+        signals = [{"date": str(dates[5].date()), "direction": "long", "strength": 0.8}]
+        slip = 0.10  # 0.1% slippage
+        result = BacktestEngine().run(df, signals, slippage_pct=slip,
+                                      commission_per_trade=2.0,
+                                      stop_loss_pct=20.0, take_profit_pct=20.0)
+        assert result.total_trades >= 1
+        t = result.trades[0]
+        close_at_entry = prices[5]
+        # Long entry: fill must be higher than close by ~slippage
+        assert t["entry_price"] > close_at_entry
+        assert abs(t["entry_price"] - close_at_entry * (1 + slip / 100)) < 1e-6
 
 
 # ── Valuation Engine ──
@@ -351,6 +412,28 @@ class TestExecutionEngine:
         assert snap.optimal_algo is not None
         assert snap.stop_run_risk is not None
         assert snap.stop_run_risk in ("low", "medium", "high")
+
+    def test_round_number_stop_cluster(self):
+        """round_below must always be floor(price), not conditional on fractional part."""
+        from backend.engines.execution import ExecutionEngine
+        import datetime as dt
+        e = ExecutionEngine()
+        # Use bars with lows far below price so round number is the closest stop
+        bars = [{"bar_time": dt.datetime(2024, 1, 1, 10, i), "open": 75.0,
+                 "high": 75.5, "low": 60.0, "close": 75.0, "volume": 100_000}
+                for i in range(20)]
+        # For price=70.3: round_below=70, distance=(70.3-70)/70.3*100≈0.427%
+        # For price=70.7: round_below=70, distance=(70.7-70)/70.7*100≈0.990%
+        # Both should produce stop_run_proximity_pct ≈ (price-70)/price*100
+        for price in [70.3, 70.7, 70.99]:
+            snap = e.analyze(price=price, bars=bars)
+            expected_below = int(price)  # floor
+            if snap.stop_run_proximity_pct is not None:
+                expected_dist = (price - expected_below) / price * 100
+                assert abs(snap.stop_run_proximity_pct - expected_dist) < 0.1, (
+                    f"price={price}: got {snap.stop_run_proximity_pct:.3f}, "
+                    f"expected {expected_dist:.3f} (round_below={expected_below})"
+                )
 
 
 # ── Data Governance Engine ──

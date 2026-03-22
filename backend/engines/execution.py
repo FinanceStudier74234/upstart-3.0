@@ -233,9 +233,9 @@ class ExecutionEngine:
             return
         recent_lows = sorted(b.get("low", 0) for b in bars[-20:] if b.get("low"))
         recent_highs = sorted((b.get("high", 0) for b in bars[-20:] if b.get("high")), reverse=True)
-        # Round-number stop clusters
-        round_below = int(price) if price % 1 > 0.5 else int(price) - 1
-        round_above = int(price) + 1 if price % 1 < 0.5 else int(price) + 2
+        # Round-number stop clusters (floor/ceil to nearest integer)
+        round_below = int(price)          # e.g. 70.3 → 70, 70.9 → 70
+        round_above = int(price) + 1      # e.g. 70.3 → 71, 70.9 → 71
         # Closest stop cluster: recent swing low or round number below
         stop_levels = []
         if recent_lows:

@@ -66,10 +66,14 @@ class BacktestEngine:
         stop_loss_pct: float = 5.0,
         take_profit_pct: float = 10.0,
         spy_df: pd.DataFrame | None = None,
+        slippage_pct: float = 0.05,   # half-spread slippage per side, percent
+        commission_per_trade: float = 1.0,  # flat $ per trade (entry + exit)
     ) -> BacktestResult:
         """
         df: OHLCV DataFrame indexed by datetime
         signals: list of {"date": str, "direction": "long"|"short", "strength": float}
+        slippage_pct: one-way slippage as % of price (applied at entry and exit)
+        commission_per_trade: total round-trip commission in $
         """
         result = BacktestResult(strategy_name=strategy_name)
 
@@ -96,29 +100,39 @@ class BacktestEngine:
                     pnl_pct = -pnl_pct
 
                 if pnl_pct <= -stop_loss_pct / 100:
-                    # Stop loss hit
-                    pnl = position["size"] * pnl_pct
+                    # Stop loss hit — apply exit slippage (adverse: longs get worse fill)
+                    slip = slippage_pct / 100
+                    exit_price = price * (1 - slip) if position["direction"] == "long" else price * (1 + slip)
+                    pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"]
+                    if position["direction"] == "short":
+                        pnl_pct = -pnl_pct
+                    pnl = position["size"] * pnl_pct - commission_per_trade / 2
                     capital += position["size"] + pnl
                     trades.append({
                         "entry_date": position["entry_date"],
                         "exit_date": date,
                         "direction": position["direction"],
                         "entry_price": position["entry_price"],
-                        "exit_price": price,
+                        "exit_price": round(exit_price, 4),
                         "pnl": round(pnl, 2),
                         "pnl_pct": round(pnl_pct * 100, 2),
                         "exit_reason": "stop",
                     })
                     position = None
                 elif pnl_pct >= take_profit_pct / 100:
-                    pnl = position["size"] * pnl_pct
+                    slip = slippage_pct / 100
+                    exit_price = price * (1 - slip) if position["direction"] == "long" else price * (1 + slip)
+                    pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"]
+                    if position["direction"] == "short":
+                        pnl_pct = -pnl_pct
+                    pnl = position["size"] * pnl_pct - commission_per_trade / 2
                     capital += position["size"] + pnl
                     trades.append({
                         "entry_date": position["entry_date"],
                         "exit_date": date,
                         "direction": position["direction"],
                         "entry_price": position["entry_price"],
-                        "exit_price": price,
+                        "exit_price": round(exit_price, 4),
                         "pnl": round(pnl, 2),
                         "pnl_pct": round(pnl_pct * 100, 2),
                         "exit_reason": "target",
@@ -132,8 +146,14 @@ class BacktestEngine:
                 if matching:
                     sig = matching[0]
                     size = capital * position_size_pct / 100
+                    # Apply entry slippage: longs pay more, shorts receive less
+                    slip = slippage_pct / 100
+                    entry_price = price * (1 + slip) if sig["direction"] == "long" else price * (1 - slip)
+                    # Deduct commission at entry (half of round-trip)
+                    commission_entry = commission_per_trade / 2
+                    capital -= commission_entry
                     position = {
-                        "entry_price": price,
+                        "entry_price": entry_price,
                         "direction": sig["direction"],
                         "entry_date": date,
                         "size": size,
@@ -152,16 +172,18 @@ class BacktestEngine:
         # Close any open position
         if position and len(close) > 0:
             final_price = float(close.iloc[-1])
-            pnl_pct = (final_price - position["entry_price"]) / position["entry_price"]
+            slip = slippage_pct / 100
+            exit_price = final_price * (1 - slip) if position["direction"] == "long" else final_price * (1 + slip)
+            pnl_pct = (exit_price - position["entry_price"]) / position["entry_price"]
             if position["direction"] == "short":
                 pnl_pct = -pnl_pct
-            pnl = position["size"] * pnl_pct
+            pnl = position["size"] * pnl_pct - commission_per_trade / 2
             trades.append({
                 "entry_date": position["entry_date"],
                 "exit_date": df.index[-1],
                 "direction": position["direction"],
                 "entry_price": position["entry_price"],
-                "exit_price": final_price,
+                "exit_price": round(exit_price, 4),
                 "pnl": round(pnl, 2),
                 "pnl_pct": round(pnl_pct * 100, 2),
                 "exit_reason": "end_of_period",

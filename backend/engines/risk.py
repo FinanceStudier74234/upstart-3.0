@@ -97,11 +97,11 @@ class RiskEngine:
         daily_vol = float(np.std(returns))
         annual_vol = daily_vol * math.sqrt(252)
 
-        # 1. Volatility-targeted sizing
+        # 1. Volatility-targeted sizing (cap at 50% for degenerate low-vol cases)
         if annual_vol > 0:
-            rm.vol_target_size_pct = round(target_vol / annual_vol * 100, 2)
+            rm.vol_target_size_pct = round(min(target_vol / annual_vol * 100, 50.0), 2)
         else:
-            rm.vol_target_size_pct = 100.0
+            rm.vol_target_size_pct = 50.0
 
         # 2. Kelly Criterion
         if avg_loss > 0:

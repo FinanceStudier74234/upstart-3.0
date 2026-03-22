@@ -86,8 +86,15 @@ class ScenarioEngine:
         out = ScenarioOutput(inputs=inputs)
 
         # ── Price impact from SPY ──
+        # spy_return_pct: expected period return (drives price target)
+        # spy_drawdown_pct: peak-to-trough drawdown within the period (path risk)
+        # Use spy_return_pct for price target; intraday drawdown path risk is
+        # reflected in the downside probability, not summed into the return.
         effective_beta = inputs.beta_override or beta
-        spy_impact = effective_beta * (inputs.spy_return_pct + inputs.spy_drawdown_pct)
+        spy_impact = effective_beta * inputs.spy_return_pct
+        # Incremental path-dependent drawdown risk (beyond the period return)
+        spy_drawdown_extra = inputs.spy_drawdown_pct - min(inputs.spy_return_pct, 0)
+        spy_path_risk = effective_beta * min(spy_drawdown_extra, 0)  # only negative excess
 
         # ── Rates impact ──
         # UPST is rate-sensitive: higher rates hurt origination
@@ -114,10 +121,13 @@ class ScenarioEngine:
             funding_impact + val_impact + macro_impact +
             credit_impact + world_impact
         )
+        # Worst-case path impact (drawdown beyond the period return)
+        worst_case_impact = total_impact + spy_path_risk / 100
 
         out.adjusted_price_target = round(base_price * (1 + total_impact), 2)
         out.adjusted_upside_pct = round(max(0, total_impact * 100), 2)
-        out.adjusted_downside_pct = round(abs(min(0, total_impact * 100)), 2)
+        # Downside reflects worst-case path, not just period return
+        out.adjusted_downside_pct = round(abs(min(0, worst_case_impact * 100)), 2)
         out.spy_adjusted_expected_move = round(spy_impact, 2)
 
         # ── Probabilities (heuristic, must stay in [0, 1] and sum <= 1) ──
