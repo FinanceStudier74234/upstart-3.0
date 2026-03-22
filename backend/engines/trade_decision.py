@@ -81,8 +81,10 @@ class TradeDecisionEngine:
             regime_probs = hmm_regime.get("regime_probs", [])
             current_regime = hmm_regime.get("current_regime")
             regime_names = ["bull", "neutral", "bear"]
-            if current_regime is not None and current_regime < len(regime_names):
+            if isinstance(current_regime, int) and current_regime < len(regime_names):
                 regime_context = regime_names[current_regime]
+            elif isinstance(current_regime, str) and current_regime in regime_names:
+                regime_context = current_regime
                 if hmm_regime.get("regime_change_detected"):
                     rec.risk_factors.append(f"HMM regime change detected — transitioning {regime_context}")
 

@@ -155,6 +155,7 @@ class FullAnalysis:
     copula_risk: dict = field(default_factory=dict)
     dcc: dict = field(default_factory=dict)
     intraday: dict = field(default_factory=dict)
+    arima_forecast: dict = field(default_factory=dict)
     credit_model: dict = field(default_factory=dict)
     yield_curve: dict = field(default_factory=dict)
     calibration: dict = field(default_factory=dict)
@@ -210,6 +211,7 @@ class Orchestrator:
         self.intraday_engine = IntradayEngine() if IntradayEngine else None
         self.credit_model_engine = CreditModelEngine() if CreditModelEngine else None
         self.yield_curve_engine = YieldCurveEngine() if YieldCurveEngine else None
+        self.arima_engine = ARIMAForecastEngine() if ARIMAForecastEngine else None
         self.calibration_engine = CalibrationEngine() if CalibrationEngine else None
 
         # Bots
@@ -574,6 +576,14 @@ class Orchestrator:
                 if yc_result:
                     analysis.yield_curve = self._snapshot_to_dict(yc_result)
 
+        # ARIMA-GARCH return forecasting
+        if self.arima_engine and upst_returns is not None and len(upst_returns) >= 40:
+            arima_result = self._safe_engine_call(
+                "arima_forecast", self.arima_engine.forecast,
+                upst_returns, horizon=21, price=analysis.price)
+            if arima_result:
+                analysis.arima_forecast = self._snapshot_to_dict(arima_result)
+
         # ── 7. Scores (now with all engine data) ──
         scores = self._safe_engine_call(
             "scoring", self.scoring_engine.compute_all,
@@ -774,6 +784,35 @@ class Orchestrator:
                     result[k] = v
             return result
         return vars(obj) if hasattr(obj, "__dict__") else {}
+
+    def run_calibration(
+        self,
+        returns: "np.ndarray",
+        scores_history: list[dict],
+        signals_history: list[dict],
+    ) -> dict:
+        """Run model calibration against historical score and signal data.
+
+        This is a batch method intended to be called with accumulated
+        historical analysis results, not during a live run_full_analysis pass.
+
+        Parameters
+        ----------
+        returns : np.ndarray
+            Daily return series aligned with scores_history / signals_history.
+        scores_history : list[dict]
+            One dict per day with values for each of the 15 score dimensions.
+        signals_history : list[dict]
+            One dict per day with keys: prob_up, regime, direction,
+            forecast_models (dict[str, float]).
+        """
+        if not self.calibration_engine:
+            return {"error": "CalibrationEngine not available"}
+        result = self._safe_engine_call(
+            "calibration", self.calibration_engine.calibrate,
+            returns, scores_history, signals_history,
+        )
+        return self._snapshot_to_dict(result) if result else {}
 
 
 # Singleton

@@ -818,3 +818,33 @@ class TestMicrostructureEngine:
         assert np.isfinite(result.roll_spread) or result.roll_spread == 0.0
         assert 0 <= result.toxicity_score <= 1.0
         assert result.n_bars == len(bars)
+
+
+class TestCalibrationEngine:
+    def test_calibrate(self):
+        from backend.engines.calibration import CalibrationEngine, SCORE_NAMES
+        rng = np.random.RandomState(42)
+        n = 120
+        returns = rng.normal(0.0005, 0.02, n)
+        scores_history = [
+            {name: float(rng.uniform(30, 80)) for name in SCORE_NAMES}
+            for _ in range(n)
+        ]
+        signals_history = [
+            {
+                "prob_up": float(rng.uniform(0.3, 0.7)),
+                "regime": rng.choice(["bull", "neutral", "bear"]),
+                "direction": rng.choice(["bullish", "bearish", "neutral"]),
+                "forecast_models": {"arima": float(rng.normal(0, 0.01)),
+                                    "hmm": float(rng.normal(0, 0.01))},
+            }
+            for _ in range(n)
+        ]
+        result = CalibrationEngine().calibrate(returns, scores_history, signals_history)
+        assert result.n_observations == n
+        assert 0 < result.buy_threshold <= 100
+        assert 0 <= result.sell_threshold < result.buy_threshold
+        assert 0.0 <= result.brier_score <= 1.0
+        assert isinstance(result.signal_decay, dict)
+        assert isinstance(result.ensemble_weights, dict)
+        assert "all" in result.confusion
