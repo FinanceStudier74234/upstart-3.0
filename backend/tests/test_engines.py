@@ -786,9 +786,9 @@ class TestMicrostructureEngine:
                 "volume": int(row["volume"]),
             })
         result = MicrostructureEngine().analyze(bars)
-        assert result.kyle_lambda is not None
-        assert result.amihud_illiquidity is not None
-        assert result.vpin is not None
-        assert result.roll_spread is not None
-        assert result.flow_toxicity_regime in ("normal", "elevated", "toxic")
-        assert 0 <= result.liquidity_score <= 100
+        assert np.isfinite(result.kyle_lambda)
+        assert np.isfinite(result.amihud_illiquidity)
+        assert np.isfinite(result.vpin)
+        assert np.isfinite(result.roll_spread) or result.roll_spread == 0.0
+        assert 0 <= result.toxicity_score <= 1.0
+        assert result.n_bars == len(bars)

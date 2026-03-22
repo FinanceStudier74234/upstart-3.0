@@ -74,6 +74,26 @@ try:
     from backend.engines.arima_forecast import ARIMAForecastEngine
 except ImportError:
     ARIMAForecastEngine = None
+try:
+    from backend.engines.dcc import DCCEngine
+except ImportError:
+    DCCEngine = None
+try:
+    from backend.engines.intraday import IntradayEngine
+except ImportError:
+    IntradayEngine = None
+try:
+    from backend.engines.calibration import CalibrationEngine
+except ImportError:
+    CalibrationEngine = None
+try:
+    from backend.engines.credit_model import CreditModelEngine
+except ImportError:
+    CreditModelEngine = None
+try:
+    from backend.engines.yield_curve import YieldCurveEngine
+except ImportError:
+    YieldCurveEngine = None
 
 from backend.bots.price_action_bot import PriceActionBot
 from backend.bots.squeeze_bot import SqueezeBot
@@ -133,6 +153,11 @@ class FullAnalysis:
     microstructure: dict = field(default_factory=dict)
     kalman_beta: dict = field(default_factory=dict)
     copula_risk: dict = field(default_factory=dict)
+    dcc: dict = field(default_factory=dict)
+    intraday: dict = field(default_factory=dict)
+    credit_model: dict = field(default_factory=dict)
+    yield_curve: dict = field(default_factory=dict)
+    calibration: dict = field(default_factory=dict)
 
     # Data quality
     data_sources: dict = field(default_factory=dict)
@@ -181,6 +206,11 @@ class Orchestrator:
         self.microstructure_engine = MicrostructureEngine() if MicrostructureEngine else None
         self.kalman_beta_engine = KalmanBetaEngine() if KalmanBetaEngine else None
         self.copula_risk_engine = CopulaRiskEngine() if CopulaRiskEngine else None
+        self.dcc_engine = DCCEngine() if DCCEngine else None
+        self.intraday_engine = IntradayEngine() if IntradayEngine else None
+        self.credit_model_engine = CreditModelEngine() if CreditModelEngine else None
+        self.yield_curve_engine = YieldCurveEngine() if YieldCurveEngine else None
+        self.calibration_engine = CalibrationEngine() if CalibrationEngine else None
 
         # Bots
         self.bots = {
@@ -480,6 +510,45 @@ class Orchestrator:
                 upst_returns[:min_len], spy_returns[:min_len])
             if copula_result:
                 analysis.copula_risk = self._snapshot_to_dict(copula_result)
+
+        # DCC (Dynamic Conditional Correlation)
+        if self.dcc_engine and upst_returns is not None and spy_returns is not None:
+            min_len = min(len(upst_returns), len(spy_returns))
+            dcc_result = self._safe_engine_call(
+                "dcc", self.dcc_engine.estimate,
+                upst_returns[:min_len], spy_returns[:min_len])
+            if dcc_result:
+                analysis.dcc = self._snapshot_to_dict(dcc_result)
+
+        # Credit model (Merton structural)
+        if self.credit_model_engine and analysis.price > 0:
+            market_cap = analysis.price * 85e6  # Approx shares outstanding
+            equity_vol = float(np.std(upst_returns) * np.sqrt(252)) if upst_returns is not None and len(upst_returns) > 30 else 0.65
+            total_debt = analysis.stress.get("total_debt", 1000e6) if analysis.stress else 1000e6
+            cash = analysis.stress.get("cash", 500e6) if analysis.stress else 500e6
+            rf = (analysis.macro.get("fed_funds", 5.0) or 5.0) / 100
+            credit_result = self._safe_engine_call(
+                "credit_model", self.credit_model_engine.analyze,
+                market_cap, equity_vol, total_debt, cash, rf)
+            if credit_result:
+                analysis.credit_model = self._snapshot_to_dict(credit_result)
+
+        # Yield curve (Nelson-Siegel)
+        if self.yield_curve_engine and analysis.macro:
+            treasury_rates = {}
+            macro = analysis.macro
+            if macro.get("treasury_2y"):
+                treasury_rates["2y"] = macro["treasury_2y"]
+            if macro.get("treasury_10y"):
+                treasury_rates["10y"] = macro["treasury_10y"]
+            if macro.get("fed_funds"):
+                treasury_rates["3m"] = macro["fed_funds"]
+            if treasury_rates:
+                yc_result = self._safe_engine_call(
+                    "yield_curve", self.yield_curve_engine.analyze,
+                    treasury_rates, upst_returns)
+                if yc_result:
+                    analysis.yield_curve = self._snapshot_to_dict(yc_result)
 
         # ── 7. Scores (now with all engine data) ──
         scores = self._safe_engine_call(

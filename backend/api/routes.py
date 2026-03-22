@@ -319,6 +319,41 @@ async def sec_filings(ticker: str = Query("UPST", max_length=10, pattern=r"^[A-Z
     return {"filings": env.data, "source": env.source}
 
 
+@router.get("/dcc")
+async def dcc_correlation():
+    """DCC-GARCH dynamic conditional correlation (UPST vs SPY)."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.dcc
+
+
+@router.get("/credit-model")
+async def credit_model():
+    """Merton structural credit model: distance-to-default, PD, Z-Score."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.credit_model
+
+
+@router.get("/yield-curve")
+async def yield_curve():
+    """Nelson-Siegel yield curve model with rate shock scenarios."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.yield_curve
+
+
+@router.get("/intraday")
+async def intraday():
+    """Intraday analysis: VWAP, ORB, volume profile, gap analysis."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.intraday
+
+
+@router.get("/calibration")
+async def calibration_report():
+    """Model calibration: score-to-return mapping, probability reliability."""
+    analysis = await orchestrator.run_full_analysis()
+    return analysis.calibration
+
+
 # ── Scenario Lab ──
 class ScenarioRequest(BaseModel):
     spy_return_pct: float = 0.0

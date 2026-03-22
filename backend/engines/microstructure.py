@@ -1,424 +1,667 @@
 """
-Market Microstructure Engine — Kyle lambda, Amihud illiquidity, VPIN,
-Roll/Corwin-Schultz spreads, order-flow toxicity.
-
-References:
-  Kyle (1985), Amihud (2002), Easley et al. (2012) VPIN,
-  Roll (1984), Corwin & Schultz (2012)
+Market Microstructure Engine
+Kyle's lambda, Amihud illiquidity, VPIN, Roll spread, Corwin-Schultz spread,
+order-flow toxicity, intraday volatility signature, and effective spread decomposition.
 """
 
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
-from scipy import stats
+from scipy import stats as sp_stats
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_EPS = 1e-12
+
+
+def _safe_float(val: Any, default: float = float("nan")) -> float:
+    if val is None:
+        return default
+    try:
+        v = float(val)
+        return v if np.isfinite(v) else default
+    except (TypeError, ValueError):
+        return default
+
+
+def _returns(prices: np.ndarray) -> np.ndarray:
+    """Simple returns from a price series, length n-1."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ret = np.diff(prices) / prices[:-1]
+    ret[~np.isfinite(ret)] = 0.0
+    return ret
+
+
+def _log_returns(prices: np.ndarray) -> np.ndarray:
+    """Log returns, length n-1."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        lr = np.diff(np.log(prices))
+    lr[~np.isfinite(lr)] = 0.0
+    return lr
+
+
+# ---------------------------------------------------------------------------
+# Result dataclass
+# ---------------------------------------------------------------------------
 
 @dataclass
 class MicrostructureResult:
-    """Complete microstructure analysis."""
+    """Complete market microstructure analytics."""
 
-    # Kyle's lambda (price impact coefficient)
-    kyle_lambda: float | None = None
-    kyle_lambda_t_stat: float | None = None
+    # Kyle's Lambda
+    kyle_lambda: float = float("nan")
+    kyle_lambda_t_stat: float = float("nan")
+    kyle_lambda_r2: float = float("nan")
 
-    # Amihud illiquidity ratio
-    amihud_illiquidity: float | None = None
-    amihud_illiquidity_20d: float | None = None
+    # Amihud illiquidity
+    amihud_illiquidity: float = float("nan")
+    amihud_series: list[float] = field(default_factory=list)
 
-    # VPIN (Volume-synchronized Probability of Informed Trading)
-    vpin: float | None = None
+    # VPIN
+    vpin: float = float("nan")
     vpin_series: list[float] = field(default_factory=list)
+    vpin_threshold: float = 0.7  # above this -> toxic flow
 
-    # Roll (1984) spread estimator
-    roll_spread: float | None = None
+    # Roll spread
+    roll_spread: float = float("nan")
+    roll_effective_spread_bps: float = float("nan")
 
-    # Corwin-Schultz (2012) high-low spread
-    corwin_schultz_spread: float | None = None
-
-    # Effective spread decomposition
-    permanent_impact_pct: float | None = None  # information component
-    temporary_impact_pct: float | None = None  # liquidity component
+    # Corwin-Schultz spread
+    cs_spread: float = float("nan")
+    cs_spread_bps: float = float("nan")
 
     # Order flow toxicity
-    flow_toxicity_score: float | None = None  # 0-100
-    flow_toxicity_regime: str = "normal"  # normal | elevated | toxic
+    toxicity_score: float = float("nan")  # 0..1 composite
+    toxic_flow: bool = False
 
-    # Noise-to-signal
-    microstructure_noise: float | None = None
+    # Intraday volatility signature
+    vol_signature: list[dict[str, float]] = field(default_factory=list)
+    # each entry: {"sampling_freq": n_bars, "realized_vol": rv}
+    noise_ratio: float = float("nan")  # RV(1-bar)/RV(5-bar) -- >1 => noise
 
-    # Summary
-    liquidity_score: float = 50.0  # 0-100, higher = more liquid
-    n_observations: int = 0
+    # Effective spread decomposition
+    permanent_impact: float = float("nan")   # information component
+    temporary_impact: float = float("nan")   # liquidity / transient component
+    permanent_share: float = float("nan")    # fraction of total spread
 
+    # Diagnostics
+    n_bars: int = 0
+    n_trades: int = 0
+    warnings: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Engine
+# ---------------------------------------------------------------------------
 
 class MicrostructureEngine:
-    """Computes market microstructure metrics from OHLCV bar data."""
+    """
+    Analyses market microstructure from bar data and (optionally) tick-level trades.
+
+    Usage
+    -----
+    >>> engine = MicrostructureEngine()
+    >>> result = engine.analyze(bars, trades=trades)
+    """
+
+    def __init__(
+        self,
+        vpin_n_buckets: int = 50,
+        amihud_window: int = 20,
+        toxicity_weights: dict[str, float] | None = None,
+    ):
+        self.vpin_n_buckets = vpin_n_buckets
+        self.amihud_window = amihud_window
+        self.toxicity_weights = toxicity_weights or {
+            "vpin": 0.40, "lambda": 0.35, "amihud": 0.25,
+        }
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
 
     def analyze(
         self,
         bars: list[dict],
         trades: list[dict] | None = None,
     ) -> MicrostructureResult:
+        """
+        Run full microstructure analysis.
+
+        Parameters
+        ----------
+        bars : list of dicts with keys open, high, low, close, volume.
+        trades : optional list of dicts with keys price, volume, timestamp.
+
+        Returns
+        -------
+        MicrostructureResult
+        """
         result = MicrostructureResult()
 
-        if not bars or len(bars) < 20:
+        if not bars:
+            result.warnings.append("No bar data provided.")
             return result
 
-        # Extract arrays
-        closes = np.array([b.get("close", 0) for b in bars], dtype=float)
-        highs = np.array([b.get("high", 0) for b in bars], dtype=float)
-        lows = np.array([b.get("low", 0) for b in bars], dtype=float)
-        volumes = np.array([b.get("volume", 0) for b in bars], dtype=float)
+        # -- Parse bars ---------------------------------------------------
+        opens, highs, lows, closes, volumes = self._parse_bars(bars)
+        n = len(closes)
+        result.n_bars = n
+        if n < 5:
+            result.warnings.append("Fewer than 5 bars -- most metrics unreliable.")
 
-        # Filter zeros
-        mask = (closes > 0) & (highs > 0) & (lows > 0) & (volumes > 0)
-        closes = closes[mask]
-        highs = highs[mask]
-        lows = lows[mask]
-        volumes = volumes[mask]
+        # -- Parse trades -------------------------------------------------
+        trade_prices: np.ndarray | None = None
+        trade_volumes: np.ndarray | None = None
+        if trades:
+            trade_prices, trade_volumes = self._parse_trades(trades)
+            result.n_trades = len(trade_prices) if trade_prices is not None else 0
 
-        if len(closes) < 20:
-            return result
+        # -- Kyle's Lambda ------------------------------------------------
+        lam, t_stat, r2 = self._kyle_lambda(closes, volumes)
+        result.kyle_lambda = lam
+        result.kyle_lambda_t_stat = t_stat
+        result.kyle_lambda_r2 = r2
 
-        result.n_observations = len(closes)
-        returns = np.diff(np.log(closes))
-
-        # ── Kyle's Lambda ──
-        result.kyle_lambda, result.kyle_lambda_t_stat = self._kyle_lambda(
-            returns, volumes[1:]
+        # -- Amihud -------------------------------------------------------
+        result.amihud_illiquidity, result.amihud_series = self._amihud(
+            closes, volumes, self.amihud_window
         )
 
-        # ── Amihud Illiquidity ──
-        result.amihud_illiquidity = self._amihud(returns, closes[1:], volumes[1:])
-        if len(returns) >= 20:
-            result.amihud_illiquidity_20d = self._amihud(
-                returns[-20:], closes[-20:], volumes[-20:]
-            )
-
-        # ── VPIN ──
-        vpin_val, vpin_series = self._vpin(returns, volumes[1:])
+        # -- VPIN ---------------------------------------------------------
+        vpin_val, vpin_series = self._vpin(closes, volumes, self.vpin_n_buckets)
         result.vpin = vpin_val
         result.vpin_series = vpin_series
 
-        # ── Roll Spread ──
-        result.roll_spread = self._roll_spread(returns)
+        # -- Roll spread --------------------------------------------------
+        result.roll_spread, result.roll_effective_spread_bps = self._roll_spread(closes)
 
-        # ── Corwin-Schultz Spread ──
-        result.corwin_schultz_spread = self._corwin_schultz(highs, lows)
+        # -- Corwin-Schultz -----------------------------------------------
+        result.cs_spread, result.cs_spread_bps = self._corwin_schultz(highs, lows, closes)
 
-        # ── Effective Spread Decomposition ──
-        perm, temp = self._spread_decomposition(returns)
-        result.permanent_impact_pct = perm
-        result.temporary_impact_pct = temp
+        # -- Volatility signature -----------------------------------------
+        result.vol_signature, result.noise_ratio = self._volatility_signature(closes)
 
-        # ── Microstructure Noise ──
-        result.microstructure_noise = self._noise_ratio(returns)
+        # -- Effective spread decomposition --------------------------------
+        if trade_prices is not None and trade_volumes is not None and len(trade_prices) >= 10:
+            perm, temp, share = self._spread_decomposition(trade_prices, trade_volumes)
+        else:
+            # Fallback: use bar close prices
+            perm, temp, share = self._spread_decomposition(closes, volumes)
+        result.permanent_impact = perm
+        result.temporary_impact = temp
+        result.permanent_share = share
 
-        # ── Flow Toxicity ──
-        result.flow_toxicity_score, result.flow_toxicity_regime = (
-            self._flow_toxicity(result)
+        # -- Toxicity score -----------------------------------------------
+        result.toxicity_score, result.toxic_flow = self._toxicity_score(
+            result.vpin, result.kyle_lambda, result.amihud_illiquidity
         )
-
-        # ── Liquidity Score ──
-        result.liquidity_score = self._liquidity_score(result)
 
         return result
 
-    # ────────────────────────── Kyle's Lambda ──────────────────────────
+    # ------------------------------------------------------------------
+    # Parsers
+    # ------------------------------------------------------------------
 
+    @staticmethod
+    def _parse_bars(
+        bars: list[dict],
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        opens = np.array([_safe_float(b.get("open")) for b in bars])
+        highs = np.array([_safe_float(b.get("high")) for b in bars])
+        lows = np.array([_safe_float(b.get("low")) for b in bars])
+        closes = np.array([_safe_float(b.get("close")) for b in bars])
+        volumes = np.array([_safe_float(b.get("volume"), 0.0) for b in bars])
+        # Replace NaN closes with previous valid
+        for i in range(1, len(closes)):
+            if not np.isfinite(closes[i]):
+                closes[i] = closes[i - 1]
+        return opens, highs, lows, closes, volumes
+
+    @staticmethod
+    def _parse_trades(
+        trades: list[dict],
+    ) -> tuple[np.ndarray | None, np.ndarray | None]:
+        if not trades:
+            return None, None
+        prices = np.array([_safe_float(t.get("price")) for t in trades])
+        vols = np.array([_safe_float(t.get("volume"), 0.0) for t in trades])
+        valid = np.isfinite(prices) & (prices > 0)
+        if valid.sum() < 2:
+            return None, None
+        return prices[valid], vols[valid]
+
+    # ------------------------------------------------------------------
+    # Kyle's Lambda
+    # ------------------------------------------------------------------
+
+    @staticmethod
     def _kyle_lambda(
-        self, returns: np.ndarray, volumes: np.ndarray
-    ) -> tuple[float | None, float | None]:
+        closes: np.ndarray, volumes: np.ndarray
+    ) -> tuple[float, float, float]:
         """
-        Price impact = lambda * signed_volume + epsilon
-        Estimate lambda via OLS of |return| on sqrt(volume).
+        Kyle (1985) price-impact coefficient.
+
+        Regress: dP_t = lambda * SignedVolume_t + epsilon
+
+        Signed volume approximated via tick rule on close prices.
         """
-        if len(returns) < 20 or len(volumes) < 20:
-            return None, None
+        n = len(closes)
+        if n < 10:
+            return float("nan"), float("nan"), float("nan")
 
-        min_len = min(len(returns), len(volumes))
-        ret = returns[:min_len]
-        vol = volumes[:min_len]
+        dp = np.diff(closes)
+        # Tick rule: sign of price change determines buy/sell
+        signs = np.sign(dp)
+        signs[signs == 0] = 1.0  # no-change treated as continuation
 
-        # Sign volume by return direction (BVC approximation)
-        signed_vol = np.sign(ret) * np.sqrt(vol)
-        abs_ret = np.abs(ret)
+        # Signed volume (use volumes[1:] aligned with dp)
+        sv = signs * volumes[1:n]
 
-        # Filter zeros
-        nonzero = signed_vol != 0
-        if nonzero.sum() < 10:
-            return None, None
+        # Guard: need variance in signed volume
+        if np.std(sv) < _EPS:
+            return float("nan"), float("nan"), float("nan")
 
-        x = signed_vol[nonzero]
-        y = abs_ret[nonzero]
+        # OLS: dp = alpha + lambda * sv
+        X = np.column_stack([np.ones(len(sv)), sv])
+        try:
+            beta, residuals, _, _ = np.linalg.lstsq(X, dp, rcond=None)
+        except np.linalg.LinAlgError:
+            return float("nan"), float("nan"), float("nan")
 
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x, y)
+        lam = float(beta[1])
 
-        if std_err > 0:
-            t_stat = slope / std_err
+        # t-statistic and R-squared
+        dp_hat = X @ beta
+        ss_res = float(np.sum((dp - dp_hat) ** 2))
+        ss_tot = float(np.sum((dp - np.mean(dp)) ** 2))
+        r2 = 1.0 - ss_res / max(ss_tot, _EPS)
+        r2 = max(0.0, min(r2, 1.0))
+
+        dof = len(sv) - 2
+        if dof > 0 and ss_res > 0:
+            mse = ss_res / dof
+            xtx_inv = np.linalg.inv(X.T @ X)
+            se_lam = math.sqrt(max(mse * xtx_inv[1, 1], 0.0))
+            t_stat = lam / max(se_lam, _EPS)
         else:
-            t_stat = None
+            t_stat = float("nan")
 
-        return round(abs(slope), 10), round(t_stat, 4) if t_stat else None
+        return lam, float(t_stat), r2
 
-    # ────────────────────────── Amihud Illiquidity ──────────────────────
+    # ------------------------------------------------------------------
+    # Amihud illiquidity
+    # ------------------------------------------------------------------
 
+    @staticmethod
     def _amihud(
-        self, returns: np.ndarray, prices: np.ndarray, volumes: np.ndarray
-    ) -> float | None:
-        """Amihud (2002): average( |return| / dollar_volume )."""
-        min_len = min(len(returns), len(prices), len(volumes))
-        ret = returns[:min_len]
-        p = prices[:min_len]
-        v = volumes[:min_len]
+        closes: np.ndarray, volumes: np.ndarray, window: int = 20
+    ) -> tuple[float, list[float]]:
+        """
+        Amihud (2002) illiquidity ratio: mean(|r_t| / dollar_volume_t).
+        """
+        n = len(closes)
+        if n < 2:
+            return float("nan"), []
 
-        dollar_vol = p * v
-        mask = dollar_vol > 0
-        if mask.sum() < 5:
-            return None
+        rets = np.abs(_returns(closes))
+        # Dollar volume aligned with returns (use volumes[1:])
+        dvol = closes[1:] * volumes[1:n]
 
-        illiq = np.mean(np.abs(ret[mask]) / dollar_vol[mask])
-        return round(float(illiq), 14)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio = np.where(dvol > _EPS, rets / dvol, float("nan"))
 
-    # ────────────────────────── VPIN ──────────────────────────────────
+        # Rolling window
+        series: list[float] = []
+        for i in range(len(ratio)):
+            start = max(0, i - window + 1)
+            chunk = ratio[start : i + 1]
+            valid = chunk[np.isfinite(chunk)]
+            series.append(float(np.mean(valid)) if len(valid) > 0 else float("nan"))
 
+        # Overall mean
+        valid_all = ratio[np.isfinite(ratio)]
+        overall = float(np.mean(valid_all)) if len(valid_all) > 0 else float("nan")
+
+        return overall, series
+
+    # ------------------------------------------------------------------
+    # VPIN
+    # ------------------------------------------------------------------
+
+    @staticmethod
     def _vpin(
-        self, returns: np.ndarray, volumes: np.ndarray, n_buckets: int = 50
-    ) -> tuple[float | None, list[float]]:
+        closes: np.ndarray,
+        volumes: np.ndarray,
+        n_buckets: int = 50,
+    ) -> tuple[float, list[float]]:
         """
-        Volume-Synchronized Probability of Informed Trading.
-        Uses BVC (Bulk Volume Classification) to classify each bar's
-        volume as buy or sell.
+        Volume-Synchronized Probability of Informed Trading (Easley et al. 2012).
+
+        Uses Bulk Volume Classification (BVC): fraction of bar volume classified
+        as buy/sell based on normalised price change within the bar.
         """
-        if len(returns) < n_buckets or len(volumes) < n_buckets:
-            return None, []
+        n = len(closes)
+        if n < n_buckets + 1:
+            # Not enough bars for even one full bucket window
+            n_buckets = max(5, n // 2)
 
-        min_len = min(len(returns), len(volumes))
-        ret = returns[:min_len]
-        vol = volumes[:min_len]
+        dp = np.diff(closes)
+        # BVC: approximate buy fraction via CDF of normalised price change
+        sigma = np.std(dp)
+        if sigma < _EPS:
+            sigma = 1.0
 
-        # BVC: classify volume by CDF of standardized return
-        sigma = np.std(ret)
-        if sigma <= 0:
-            return None, []
+        from scipy.stats import norm
 
-        z = ret / sigma
-        buy_pct = stats.norm.cdf(z)
-        buy_vol = vol * buy_pct
-        sell_vol = vol * (1.0 - buy_pct)
+        z = dp / sigma
+        buy_frac = norm.cdf(z)  # probability bar is buy-initiated
 
-        # Compute VPIN in rolling buckets
-        total_vol = np.sum(vol)
-        bucket_size = total_vol / n_buckets
+        buy_vol = buy_frac * volumes[1:n]
+        sell_vol = (1.0 - buy_frac) * volumes[1:n]
+        total_vol = volumes[1:n]
 
-        vpin_values = []
+        # Volume buckets: aggregate bars until bucket reaches target volume
+        total_volume = float(np.nansum(total_vol))
+        if total_volume <= 0:
+            return float("nan"), []
+
+        bucket_vol_target = total_volume / n_buckets
+
+        bucket_buy: list[float] = []
+        bucket_sell: list[float] = []
         cum_buy = 0.0
         cum_sell = 0.0
         cum_vol = 0.0
 
-        for i in range(min_len):
-            cum_buy += buy_vol[i]
-            cum_sell += sell_vol[i]
-            cum_vol += vol[i]
+        for i in range(len(buy_vol)):
+            bv = float(buy_vol[i]) if np.isfinite(buy_vol[i]) else 0.0
+            sv = float(sell_vol[i]) if np.isfinite(sell_vol[i]) else 0.0
+            tv = float(total_vol[i]) if np.isfinite(total_vol[i]) else 0.0
+            cum_buy += bv
+            cum_sell += sv
+            cum_vol += tv
 
-            if cum_vol >= bucket_size and cum_vol > 0:
-                oi = abs(cum_buy - cum_sell) / cum_vol
-                vpin_values.append(round(float(oi), 6))
+            if cum_vol >= bucket_vol_target and bucket_vol_target > 0:
+                bucket_buy.append(cum_buy)
+                bucket_sell.append(cum_sell)
                 cum_buy = 0.0
                 cum_sell = 0.0
                 cum_vol = 0.0
 
-        if not vpin_values:
-            return None, []
+        # Flush remainder
+        if cum_buy + cum_sell > 0:
+            bucket_buy.append(cum_buy)
+            bucket_sell.append(cum_sell)
 
-        current_vpin = round(float(np.mean(vpin_values[-min(10, len(vpin_values)):])), 4)
-        return current_vpin, vpin_values[-100:]  # Keep last 100
+        if not bucket_buy:
+            return float("nan"), []
 
-    # ────────────────────────── Roll Spread ──────────────────────────
+        bucket_buy_arr = np.array(bucket_buy)
+        bucket_sell_arr = np.array(bucket_sell)
+        bucket_total = bucket_buy_arr + bucket_sell_arr
 
-    def _roll_spread(self, returns: np.ndarray) -> float | None:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            oi = np.abs(bucket_buy_arr - bucket_sell_arr) / np.where(
+                bucket_total > _EPS, bucket_total, float("nan")
+            )
+
+        # VPIN = rolling mean of order imbalance over last n_buckets buckets
+        vpin_window = min(n_buckets, len(oi))
+        vpin_series: list[float] = []
+        for i in range(len(oi)):
+            start = max(0, i - vpin_window + 1)
+            chunk = oi[start : i + 1]
+            valid = chunk[np.isfinite(chunk)]
+            vpin_series.append(float(np.mean(valid)) if len(valid) > 0 else float("nan"))
+
+        current_vpin = vpin_series[-1] if vpin_series else float("nan")
+        return current_vpin, vpin_series
+
+    # ------------------------------------------------------------------
+    # Roll spread
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _roll_spread(closes: np.ndarray) -> tuple[float, float]:
         """
-        Roll (1984): effective spread = 2 * sqrt( -cov(dp_t, dp_{t-1}) )
-        Only valid when autocovariance is negative.
+        Roll (1984) effective spread estimator:
+        spread = 2 * sqrt(-Cov(dP_t, dP_{t-1}))  when autocovariance is negative.
         """
-        if len(returns) < 20:
-            return None
+        dp = np.diff(closes)
+        if len(dp) < 3:
+            return float("nan"), float("nan")
 
-        price_changes = returns  # log returns ≈ price changes
-        if len(price_changes) < 2:
-            return None
+        cov = float(np.cov(dp[:-1], dp[1:])[0, 1])
 
-        autocov = np.cov(price_changes[:-1], price_changes[1:])[0, 1]
+        if cov >= 0:
+            # Positive autocovariance -- Roll spread undefined, set to 0
+            return 0.0, 0.0
 
-        if autocov >= 0:
-            return 0.0  # No Roll spread detectable
+        spread = 2.0 * math.sqrt(-cov)
+        mid = float(np.mean(closes))
+        bps = (spread / max(mid, _EPS)) * 10_000 if mid > 0 else float("nan")
+        return spread, bps
 
-        spread = 2.0 * math.sqrt(-autocov)
-        return round(float(spread), 8)
+    # ------------------------------------------------------------------
+    # Corwin-Schultz spread
+    # ------------------------------------------------------------------
 
-    # ────────────────────────── Corwin-Schultz ──────────────────────
-
+    @staticmethod
     def _corwin_schultz(
-        self, highs: np.ndarray, lows: np.ndarray
-    ) -> float | None:
+        highs: np.ndarray, lows: np.ndarray, closes: np.ndarray
+    ) -> tuple[float, float]:
         """
         Corwin & Schultz (2012) high-low spread estimator.
-        Uses adjacent bars' high and low prices.
+
+        Uses adjacent-period highs and lows to separate spread from volatility.
         """
-        if len(highs) < 3 or len(lows) < 3:
-            return None
+        n = len(highs)
+        if n < 3:
+            return float("nan"), float("nan")
 
-        # Beta: average sum of squared log(H/L) over pairs
-        log_hl = np.log(highs / lows)
-        log_hl_sq = log_hl ** 2
+        valid = (
+            np.isfinite(highs)
+            & np.isfinite(lows)
+            & (highs > _EPS)
+            & (lows > _EPS)
+            & (highs >= lows)
+        )
+        if valid.sum() < 3:
+            return float("nan"), float("nan")
 
-        # Single-period beta
-        beta_vals = []
-        for i in range(1, len(highs)):
-            # 2-period high/low
-            h2 = max(highs[i - 1], highs[i])
-            l2 = min(lows[i - 1], lows[i])
-            if h2 <= 0 or l2 <= 0 or h2 <= l2:
+        h = highs[valid]
+        lo = lows[valid]
+
+        spreads: list[float] = []
+        for i in range(len(h) - 1):
+            # Single-period beta
+            beta_single_1 = (math.log(h[i] / lo[i])) ** 2
+            beta_single_2 = (math.log(h[i + 1] / lo[i + 1])) ** 2
+            beta_sum = beta_single_1 + beta_single_2
+
+            # Two-period high/low
+            h2 = max(h[i], h[i + 1])
+            l2 = min(lo[i], lo[i + 1])
+            gamma = (math.log(h2 / l2)) ** 2
+
+            # alpha calculation
+            if beta_sum < _EPS:
                 continue
-            gamma = np.log(h2 / l2) ** 2
-            beta = log_hl_sq[i - 1] + log_hl_sq[i]
-            beta_vals.append((gamma, beta))
 
-        if len(beta_vals) < 5:
-            return None
+            k1 = 3.0 - 2.0 * math.sqrt(2.0)
+            if abs(k1) < _EPS:
+                continue
 
-        gamma_arr = np.array([x[0] for x in beta_vals])
-        beta_arr = np.array([x[1] for x in beta_vals])
+            alpha = (math.sqrt(gamma) - math.sqrt(beta_sum)) / (
+                k1 * math.sqrt(beta_sum)
+            )
 
-        gamma_mean = np.mean(gamma_arr)
-        beta_mean = np.mean(beta_arr)
+            # Spread = 2(e^alpha - 1) / (1 + e^alpha)
+            if alpha > 10:
+                s = 2.0  # cap at 200%
+            elif alpha < -10:
+                s = 0.0
+            else:
+                ea = math.exp(alpha)
+                s = 2.0 * (ea - 1.0) / (1.0 + ea)
+            spreads.append(max(s, 0.0))
 
-        k = 2.0 * math.sqrt(2.0) - 1.0
-        denom = 3.0 - 2.0 * math.sqrt(2.0)
+        if not spreads:
+            return float("nan"), float("nan")
 
-        alpha_val = (
-            math.sqrt(2.0 * beta_mean) - math.sqrt(beta_mean)
-        ) / denom - math.sqrt(gamma_mean / denom)
+        avg_spread = float(np.mean(spreads))
+        bps = avg_spread * 10_000  # already in fractional terms
+        return avg_spread, bps
 
-        # Clamp negative
-        alpha_val = max(0.0, alpha_val)
-        spread = 2.0 * (math.exp(alpha_val) - 1.0) / (1.0 + math.exp(alpha_val))
+    # ------------------------------------------------------------------
+    # Volatility signature
+    # ------------------------------------------------------------------
 
-        return round(float(spread), 8)
+    @staticmethod
+    def _volatility_signature(
+        closes: np.ndarray,
+    ) -> tuple[list[dict[str, float]], float]:
+        """
+        Realized-vol as a function of sampling frequency.
 
-    # ────────────────────────── Spread Decomposition ──────────────────
+        If RV(1-bar) >> RV(5-bar), microstructure noise dominates.
+        """
+        n = len(closes)
+        if n < 10:
+            return [], float("nan")
 
+        log_p = np.log(closes[np.isfinite(closes) & (closes > 0)])
+        if len(log_p) < 10:
+            return [], float("nan")
+
+        freqs = [1, 2, 5, 10, 15, 20, 30]
+        signature: list[dict[str, float]] = []
+        rv_at: dict[int, float] = {}
+
+        for freq in freqs:
+            if freq >= len(log_p):
+                break
+            sampled = log_p[::freq]
+            if len(sampled) < 3:
+                continue
+            lr = np.diff(sampled)
+            rv = float(np.sqrt(np.sum(lr ** 2)))
+            signature.append({"sampling_freq": freq, "realized_vol": rv})
+            rv_at[freq] = rv
+
+        noise_ratio = float("nan")
+        if 1 in rv_at and 5 in rv_at and rv_at[5] > _EPS:
+            noise_ratio = rv_at[1] / rv_at[5]
+
+        return signature, noise_ratio
+
+    # ------------------------------------------------------------------
+    # Effective spread decomposition
+    # ------------------------------------------------------------------
+
+    @staticmethod
     def _spread_decomposition(
-        self, returns: np.ndarray
-    ) -> tuple[float | None, float | None]:
+        prices: np.ndarray, volumes: np.ndarray
+    ) -> tuple[float, float, float]:
         """
-        Decompose effective spread into permanent (information) and
-        temporary (liquidity) components using return autocorrelation.
+        Decompose effective spread into permanent (information) and temporary
+        (liquidity) price impact following Huang & Stoll (1996).
+
+        Permanent impact: how much of the price change persists.
+        Temporary impact: mean-reverting component.
         """
-        if len(returns) < 30:
-            return None, None
+        n = len(prices)
+        if n < 10:
+            return float("nan"), float("nan"), float("nan")
 
-        # Variance ratio: permanent = long-run variance / short-run
-        var_1 = np.var(returns)
-        if var_1 <= 0:
-            return None, None
+        dp = np.diff(prices)
+        signs = np.sign(dp)
+        signs[signs == 0] = 1.0
 
-        # 5-day returns
-        n5 = len(returns) // 5
-        if n5 < 5:
-            return None, None
+        if len(signs) < 3:
+            return float("nan"), float("nan"), float("nan")
 
-        ret_5d = np.array([
-            np.sum(returns[i * 5:(i + 1) * 5]) for i in range(n5)
-        ])
-        var_5 = np.var(ret_5d) / 5.0
+        # 5-period forward price change as permanent component
+        lookforward = min(5, len(prices) - 2)
+        perm_impacts: list[float] = []
+        temp_impacts: list[float] = []
 
-        vr = var_5 / var_1 if var_1 > 0 else 1.0
-        # VR > 1: momentum (permanent dominates), VR < 1: reversal (temporary dominates)
-        permanent = round(min(1.0, max(0.0, vr)) * 100, 2)
-        temporary = round(100.0 - permanent, 2)
+        for i in range(len(signs) - lookforward):
+            immediate_impact = abs(dp[i])
+            future_change = prices[i + 1 + lookforward] - prices[i + 1]
+            # Permanent = portion of immediate impact that persists
+            if immediate_impact > _EPS:
+                perm = signs[i] * future_change
+                perm_impacts.append(perm)
+                temp_impacts.append(immediate_impact - max(perm, 0.0))
 
-        return permanent, temporary
+        if not perm_impacts:
+            return float("nan"), float("nan"), float("nan")
 
-    # ────────────────────────── Microstructure Noise ──────────────────
+        perm = max(float(np.nanmean(perm_impacts)), 0.0)
+        temp = max(float(np.nanmean(temp_impacts)), 0.0)
+        total = perm + temp
+        share = perm / max(total, _EPS) if total > 0 else float("nan")
 
-    def _noise_ratio(self, returns: np.ndarray) -> float | None:
+        return perm, temp, share
+
+    # ------------------------------------------------------------------
+    # Order flow toxicity (composite)
+    # ------------------------------------------------------------------
+
+    def _toxicity_score(
+        self,
+        vpin: float,
+        kyle_lambda: float,
+        amihud: float,
+    ) -> tuple[float, bool]:
         """
-        Estimate microstructure noise from first-order negative
-        autocorrelation in returns (bid-ask bounce).
+        Composite toxicity score (0-1) combining VPIN, Kyle's lambda, and
+        Amihud illiquidity.  Each component is rank-normalised to [0,1]
+        using a sigmoid mapping, then weighted.
+
+        toxic_flow = True if score > toxicity threshold.
         """
-        if len(returns) < 30:
-            return None
 
-        ac1 = np.corrcoef(returns[:-1], returns[1:])[0, 1]
-        if np.isnan(ac1):
-            return None
+        def _sigmoid_norm(x: float, center: float, scale: float) -> float:
+            """Map x to (0, 1) via logistic function centred at *center*."""
+            if not np.isfinite(x):
+                return 0.5  # agnostic
+            z = (x - center) / max(scale, _EPS)
+            z = max(min(z, 20.0), -20.0)  # clamp to avoid overflow
+            return 1.0 / (1.0 + math.exp(-z))
 
-        # Negative autocorrelation = more noise
-        noise = max(0.0, -ac1)
-        return round(float(noise), 6)
+        w = self.toxicity_weights
 
-    # ────────────────────────── Flow Toxicity ──────────────────────────
+        # VPIN: already in [0,1], higher = more toxic
+        vpin_score = float(np.clip(vpin, 0.0, 1.0)) if np.isfinite(vpin) else 0.5
 
-    def _flow_toxicity(
-        self, result: MicrostructureResult
-    ) -> tuple[float, str]:
-        """Combined toxicity score from VPIN + lambda + Amihud."""
-        score = 0.0
-        count = 0
+        # Lambda: positive = price impact; normalise around typical equity values
+        lambda_score = _sigmoid_norm(kyle_lambda, center=0.0, scale=0.001)
 
-        if result.vpin is not None:
-            # VPIN > 0.5 is concerning, > 0.7 is toxic
-            score += min(100, result.vpin * 130)
-            count += 1
-
-        if result.kyle_lambda is not None:
-            # Normalize lambda (higher = more impact = more toxic)
-            # Typical lambda for liquid stocks: 1e-8 to 1e-6
-            log_lambda = math.log10(max(result.kyle_lambda, 1e-12))
-            toxicity_from_lambda = min(100, max(0, (log_lambda + 8) * 20))
-            score += toxicity_from_lambda
-            count += 1
-
-        if result.amihud_illiquidity is not None and result.amihud_illiquidity > 0:
-            log_amihud = math.log10(max(result.amihud_illiquidity, 1e-15))
-            toxicity_from_amihud = min(100, max(0, (log_amihud + 12) * 12))
-            score += toxicity_from_amihud
-            count += 1
-
-        if count == 0:
-            return 50.0, "normal"
-
-        avg = round(score / count, 2)
-
-        if avg > 70:
-            regime = "toxic"
-        elif avg > 45:
-            regime = "elevated"
+        # Amihud: log-scale normalisation (typical daily Amihud for liquid stock ~1e-10)
+        if np.isfinite(amihud) and amihud > 0:
+            log_amihud = math.log10(amihud + _EPS)
+            amihud_score = _sigmoid_norm(log_amihud, center=-9.0, scale=2.0)
         else:
-            regime = "normal"
+            amihud_score = 0.5
 
-        return avg, regime
+        total_w = sum(w.values())
+        score = (
+            w.get("vpin", 0.4) * vpin_score
+            + w.get("lambda", 0.35) * lambda_score
+            + w.get("amihud", 0.25) * amihud_score
+        ) / max(total_w, _EPS)
 
-    # ────────────────────────── Liquidity Score ──────────────────────
-
-    def _liquidity_score(self, result: MicrostructureResult) -> float:
-        """Higher = more liquid. Inverted toxicity + spread metrics."""
-        base = 50.0
-
-        if result.flow_toxicity_score is not None:
-            base += (50 - result.flow_toxicity_score) * 0.4
-
-        if result.roll_spread is not None:
-            # Lower spread = more liquid
-            spread_penalty = min(20, result.roll_spread * 1000)
-            base += (20 - spread_penalty) * 0.3
-
-        if result.corwin_schultz_spread is not None:
-            cs_penalty = min(20, result.corwin_schultz_spread * 500)
-            base += (20 - cs_penalty) * 0.3
-
-        return round(max(0, min(100, base)), 2)
+        score = float(np.clip(score, 0.0, 1.0))
+        toxic = score > 0.7
+        return score, toxic

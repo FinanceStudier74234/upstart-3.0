@@ -8,6 +8,8 @@ import Panel from '../common/Panel'
 import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
 
+const isFinite = (v) => v !== null && v !== undefined && Number.isFinite(v)
+
 export default function QuantPanel({ analysis }) {
   if (!analysis) return <div className="text-terminal-muted p-4">Loading...</div>
   const spy = analysis.spy_relationship || {}
@@ -297,15 +299,18 @@ export default function QuantPanel({ analysis }) {
         </Panel>
       )}
 
-      {micro.kyle_lambda !== undefined && (
-        <Panel title="Microstructure Intelligence">
+      {micro.n_bars > 0 && (
+        <Panel title="Market Microstructure (Kyle/Amihud/VPIN)">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-xs">
-            <div><span className="text-terminal-muted">Kyle Lambda:</span> {micro.kyle_lambda?.toExponential(3)}</div>
-            <div><span className="text-terminal-muted">Amihud Illiquidity:</span> {micro.amihud_illiquidity?.toExponential(3)}</div>
-            <div><span className="text-terminal-muted">VPIN:</span> <span className={micro.vpin > 0.7 ? 'text-terminal-red font-bold' : ''}>{micro.vpin?.toFixed(3)}</span></div>
-            <div><span className="text-terminal-muted">Roll Spread:</span> {(micro.roll_spread * 100)?.toFixed(3)}%</div>
-            <div><span className="text-terminal-muted">CS Spread:</span> {(micro.corwin_schultz_spread * 100)?.toFixed(3)}%</div>
-            <div><span className="text-terminal-muted">Flow Toxicity:</span> <span className={`font-bold ${micro.flow_toxicity_regime === 'toxic' ? 'text-terminal-red' : micro.flow_toxicity_regime === 'elevated' ? 'text-terminal-amber' : 'text-terminal-green'}`}>{micro.flow_toxicity_regime}</span></div>
+            <div><span className="text-terminal-muted">Kyle Lambda:</span> {isFinite(micro.kyle_lambda) ? micro.kyle_lambda.toExponential(3) : '--'}</div>
+            <div><span className="text-terminal-muted">Kyle R²:</span> {isFinite(micro.kyle_lambda_r2) ? micro.kyle_lambda_r2.toFixed(4) : '--'}</div>
+            <div><span className="text-terminal-muted">Amihud Illiquidity:</span> {isFinite(micro.amihud_illiquidity) ? micro.amihud_illiquidity.toExponential(3) : '--'}</div>
+            <div><span className="text-terminal-muted">VPIN:</span> <span className={micro.vpin > 0.7 ? 'text-terminal-red font-bold' : ''}>{isFinite(micro.vpin) ? micro.vpin.toFixed(3) : '--'}</span></div>
+            <div><span className="text-terminal-muted">Roll Spread:</span> {isFinite(micro.roll_effective_spread_bps) ? `${micro.roll_effective_spread_bps.toFixed(1)} bps` : '--'}</div>
+            <div><span className="text-terminal-muted">CS Spread:</span> {isFinite(micro.cs_spread_bps) ? `${micro.cs_spread_bps.toFixed(1)} bps` : '--'}</div>
+            <div><span className="text-terminal-muted">Noise Ratio:</span> {isFinite(micro.noise_ratio) ? micro.noise_ratio.toFixed(3) : '--'}</div>
+            <div><span className="text-terminal-muted">Perm Impact Share:</span> {isFinite(micro.permanent_share) ? `${(micro.permanent_share * 100).toFixed(1)}%` : '--'}</div>
+            <div><span className="text-terminal-muted">Toxicity:</span> <span className={`font-bold ${micro.toxic_flow ? 'text-terminal-red' : micro.toxicity_score > 0.5 ? 'text-terminal-amber' : 'text-terminal-green'}`}>{micro.toxic_flow ? 'TOXIC' : isFinite(micro.toxicity_score) ? micro.toxicity_score.toFixed(3) : '--'}</span></div>
           </div>
         </Panel>
       )}
