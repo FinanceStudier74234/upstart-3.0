@@ -58,6 +58,8 @@ class MockMarketAdapter(BaseMarketAdapter):
     async def get_bars(
         self, ticker: str, timeframe: str, start: dt.date, end: dt.date,
     ) -> DataEnvelope:
+        if timeframe == "1min":
+            return self._get_minute_bars(ticker, start, end)
         base = self._base_price if ticker == "UPST" else self._spy_price
         sigma = 0.65 if ticker == "UPST" else 0.15  # UPST is high-vol
         days = (end - start).days
@@ -82,6 +84,37 @@ class MockMarketAdapter(BaseMarketAdapter):
         return DataEnvelope(
             data=records, source="mock", source_label="mock", confidence=0.5,
             warnings=["Mock GBM-generated price data"],
+        )
+
+    def _get_minute_bars(self, ticker: str, start: dt.date, end: dt.date) -> DataEnvelope:
+        """Generate realistic intraday 1-minute bars for a single RTH session."""
+        base = self._base_price if ticker == "UPST" else self._spy_price
+        sigma_daily = 0.65 if ticker == "UPST" else 0.15
+        sigma_min = sigma_daily / math.sqrt(252 * 390)  # scale to 1-minute
+        # Use the most recent weekday in [start, end] as the session date
+        session_date = end
+        while session_date.weekday() >= 5:
+            session_date -= dt.timedelta(days=1)
+        rth_open = dt.datetime.combine(session_date, dt.time(9, 30), tzinfo=dt.timezone.utc)
+        n_bars = 390  # 9:30–16:00
+        closes = _gbm_path(base, 0.0, sigma_min, n_bars)
+        records = []
+        for i in range(n_bars):
+            c = closes[i + 1]
+            bar_range = abs(c - closes[i]) + abs(c * sigma_min * _rng.uniform(0.5, 2.0))
+            h = round(max(c, closes[i]) + bar_range * 0.3, 2)
+            l = round(min(c, closes[i]) - bar_range * 0.3, 2)
+            o = round(closes[i], 2)
+            records.append({
+                "ticker": ticker, "timeframe": "1min",
+                "bar_time": rth_open + dt.timedelta(minutes=i),
+                "open": o, "high": h, "low": l, "close": round(c, 2),
+                "volume": _rng.randint(10_000, 200_000),
+                "vwap": round((h + l + c) / 3, 2),
+            })
+        return DataEnvelope(
+            data=records, source="mock", source_label="mock", confidence=0.5,
+            warnings=["Mock GBM-generated 1-minute intraday data"],
         )
 
     async def get_options_chain(self, ticker: str) -> DataEnvelope:

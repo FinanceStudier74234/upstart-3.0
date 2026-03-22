@@ -238,6 +238,8 @@ class Orchestrator:
         start = end - dt.timedelta(days=365)
         upst_bars_env = await data_provider.get_bars("UPST", "1d", start, end)
         spy_bars_env = await data_provider.get_bars("SPY", "1d", start, end)
+        intraday_start = end - dt.timedelta(days=1)
+        upst_1min_env = await data_provider.get_bars("UPST", "1min", intraday_start, end)
 
         options_env = await data_provider.get_options_chain("UPST")
         short_env = await data_provider.get_short_interest("UPST")
@@ -519,6 +521,28 @@ class Orchestrator:
                 upst_returns[:min_len], spy_returns[:min_len])
             if dcc_result:
                 analysis.dcc = self._snapshot_to_dict(dcc_result)
+
+        # Intraday analysis (VWAP, ORB, regime, volume profile, momentum, gap, auction)
+        if self.intraday_engine and upst_1min_env.data:
+            minute_bars = upst_1min_env.data if isinstance(upst_1min_env.data, list) else []
+            if minute_bars:
+                daily_atr = None
+                intraday_prev_close = None
+                if not upst_df.empty and len(upst_df) >= 2:
+                    tr = np.maximum(
+                        upst_df["high"].values - upst_df["low"].values,
+                        np.maximum(
+                            np.abs(upst_df["high"].values[1:] - upst_df["close"].values[:-1]),
+                            np.abs(upst_df["low"].values[1:] - upst_df["close"].values[:-1]),
+                        ).tolist() + [0.0],  # pad last bar
+                    )
+                    daily_atr = float(np.mean(tr[-14:]))
+                    intraday_prev_close = float(upst_df["close"].iloc[-1])
+                intraday_result = self._safe_engine_call(
+                    "intraday", self.intraday_engine.analyze,
+                    minute_bars, daily_atr=daily_atr, prev_close=intraday_prev_close)
+                if intraday_result:
+                    analysis.intraday = self._snapshot_to_dict(intraday_result)
 
         # Credit model (Merton structural)
         if self.credit_model_engine and analysis.price > 0:

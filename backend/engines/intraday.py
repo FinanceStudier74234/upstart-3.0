@@ -144,7 +144,7 @@ class IntradayEngine:
         self._regime(snap, closes)
         self._volume_profile(snap, highs, lows, closes, volumes)
         self._momentum(snap, closes)
-        self._gap(snap, opens, highs, lows, closes, times)
+        self._gap(snap, opens, highs, lows, closes, times, prev_close)
         self._sessions(snap, times, highs, lows, closes, volumes)
         self._stop_run(snap, opens, highs, lows, closes, volumes)
         self._auction(snap, highs, lows, closes, volumes)
@@ -490,6 +490,7 @@ class IntradayEngine:
         lows: np.ndarray,
         closes: np.ndarray,
         times: list[dt.datetime],
+        prev_close_override: float | None = None,
     ) -> None:
         # Find the first regular-session bar (>= 9:30)
         rth_idx: int | None = None
@@ -498,13 +499,20 @@ class IntradayEngine:
                 rth_idx = i
                 break
 
-        if rth_idx is None or rth_idx == 0:
+        if rth_idx is None:
             snap.gap_direction = "none"
             return
 
-        # Previous close is the last bar before the RTH open
-        prev_close = float(closes[rth_idx - 1])
         rth_open = float(opens[rth_idx])
+
+        # Derive previous close: prefer caller-supplied value, then last pre-RTH bar
+        if prev_close_override is not None and prev_close_override > 0:
+            prev_close = prev_close_override
+        elif rth_idx > 0:
+            prev_close = float(closes[rth_idx - 1])
+        else:
+            snap.gap_direction = "none"
+            return
 
         if prev_close == 0:
             snap.gap_direction = "none"
