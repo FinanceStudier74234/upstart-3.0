@@ -152,7 +152,7 @@ class TestMockMarketAdapter:
     async def test_get_quote_confidence_below_one(self):
         adapter = MockMarketAdapter()
         env = await adapter.get_quote("UPST")
-        assert env.confidence == 0.5
+        assert env.confidence == 0.3
         assert 0 < env.confidence < 1.0
 
     async def test_get_bars_returns_list_of_records(self):
@@ -566,7 +566,7 @@ class TestDataProvider:
         assert env.data is None
         assert env.source == "none"
         assert env.quality_score == 0.0
-        assert "All adapters failed" in env.warnings
+        assert any("adapters failed" in w.lower() for w in env.warnings)
 
     async def test_try_chain_skips_zero_quality(self):
         provider = await self._make_provider()

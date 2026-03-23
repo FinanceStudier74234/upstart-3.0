@@ -520,12 +520,8 @@ async def test_run_bot_unknown_name_fails(client: AsyncClient):
     """Running an unknown bot should return an error response."""
     payload = {"bot_name": "nonexistent_bot_xyz", "params": {}}
     resp = await client.post("/api/v1/bot", json=payload)
-    # The orchestrator returns {"error": "Unknown bot: ..."} with 200,
-    # so we check the error field in the response
-    assert resp.status_code == 200
-    body = resp.json()
-    assert "error" in body
-    assert "nonexistent_bot_xyz" in body["error"]
+    # Bot name validation now rejects invalid names with 400/422
+    assert resp.status_code in (400, 422)
 
 
 # ---------------------------------------------------------------------------

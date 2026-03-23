@@ -220,6 +220,88 @@ ALERT_THRESHOLDS = {
     "correlation_breakdown": 0.15,
 }
 
+# ── Scoring Engine Thresholds ──
+# Funding benchmarks (what value = 100 score)
+FUNDING_CAPACITY_BENCHMARK = 3.0        # $3B committed = 100
+FUNDING_COVERAGE_BENCHMARK_MONTHS = 24  # 24 months = 100
+FUNDING_PARTNER_BENCHMARK = 10          # 10 partners = 100
+FUNDING_MATURITY_BENCHMARK_MONTHS = 36  # 36 months avg maturity = 100
+
+# Origination scaling
+ORIGINATION_GROWTH_NEUTRAL = 50         # Midpoint for QoQ/YoY growth mapping
+ORIGINATION_PRODUCT_BENCHMARK = 4       # 4 products = 100
+
+# Macro scaling
+MACRO_FED_SCALING = 15                  # fed_funds * 15 (5% → 75 score)
+MACRO_HY_SPREAD_NEUTRAL_BPS = 200      # Baseline HY spread
+MACRO_HY_SPREAD_SCALING = 4            # (spread - 200) / 4
+MACRO_UNEMPLOYMENT_SCALING = 15         # unemployment * 15
+MACRO_DELINQUENCY_SCALING = 25          # delinquency * 25
+
+# Valuation scaling
+VALUATION_PS_MEDIAN_DEFAULT = 8.0       # Historical P/S median for UPST
+VALUATION_PS_PEERS_SCALING = 8          # 100 - ps * 8
+VALUATION_EV_REV_SCALING = 8            # 100 - ev/rev * 8
+VALUATION_GROWTH_ADJ_SCALING = 15       # growth / ps * 15
+
+# News scaling
+NEWS_SENTIMENT_SCALING = 50             # sentiment * 50 → 0..100 mapping
+NEWS_RISK_ADJUSTMENT = 10               # Points for policy/world/funding risk
+
+# Trade quality thresholds
+TRADE_QUALITY_CONFIDENCE_FLOOR = 0.5    # Min confidence to count in agreement
+TRADE_QUALITY_BULLISH_THRESHOLD = 60    # Score > 60 = bullish signal
+TRADE_QUALITY_BEARISH_THRESHOLD = 40    # Score < 40 = bearish signal
+COMPOSITE_CONFIDENCE_FLOOR = 0.3        # Min confidence to include in composite
+
+# Fragility scaling
+FRAGILITY_STALE_PENALTY = 5             # Points per stale input (capped)
+FRAGILITY_MAX_STALE_PENALTY = 40        # Max points from stale data
+FRAGILITY_BASE = 20                     # Base fragility score
+
+# ── Trade Decision Thresholds ──
+TD_MIN_TRADE_QUALITY = 30               # Below this → no_trade
+TD_MIN_SIGNAL_AGREEMENT = 30            # Below this → no_trade
+TD_COMPOSITE_BULLISH = 65               # Above this + bullish signals → bullish
+TD_COMPOSITE_BEARISH = 35               # Below this → bearish
+TD_TECH_BUY_THRESHOLD = 70              # Technical > 70 → buy common stock
+TD_OPTIONS_BUY_THRESHOLD = 65           # Options > 65 → buy calls
+TD_SQUEEZE_OPTIONS_THRESHOLD = 70       # Squeeze > 70 → use options not stock
+TD_SHORT_OPP_THRESHOLD = 65             # Short opp > 65 → direct short
+
+# Sizing
+TD_BASE_POSITION_PCT = 5.0             # 5% base allocation
+TD_MIN_POSITION_PCT = 1.0              # Minimum position
+TD_MAX_POSITION_PCT = 10.0             # Maximum position
+TD_QUALITY_NORM = 60                   # Quality normalization divisor
+
+# Regime multipliers for sizing
+TD_REGIME_CRISIS = 0.4
+TD_REGIME_HIGH_VOL = 0.6
+TD_REGIME_BEAR = 0.7
+TD_REGIME_BULL = 1.1
+
+# ATR-based level multipliers
+TD_ATR_TARGET_MULT = 3.0              # Target = price ± atr * 3
+TD_ATR_STOP_MULT = 1.5                # Stop = price ∓ atr * 1.5
+TD_ATR_NEUTRAL_MULT = 2.0             # Neutral hold levels
+
+# Win probability
+TD_WIN_PROB_MIN = 0.15
+TD_WIN_PROB_MAX = 0.85
+TD_COMPOSITE_PROB_SCALING = 200        # Composite-to-probability divisor
+TD_AGREEMENT_BONUS_SCALING = 500
+TD_QUALITY_BONUS_SCALING = 500
+TD_FRAGILITY_PENALTY_SCALING = 500
+
+# Confidence thresholds
+TD_HIGH_AGREEMENT = 70
+TD_HIGH_QUALITY = 60
+TD_LOW_FRAGILITY = 40
+
+# Fallback stop distance
+TD_FALLBACK_STOP_PCT = 0.02           # 2% default stop
+
 # ── Short Structure Decision Matrix ──
 SHORT_STRUCTURE_MATRIX = {
     "low_iv_low_squeeze": "direct_short",

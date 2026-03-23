@@ -9,7 +9,20 @@ import datetime as dt
 import json
 from dataclasses import dataclass, field
 
-from backend.config.constants import COMPOSITE_WEIGHTS
+from backend.config.constants import (
+    COMPOSITE_WEIGHTS,
+    FUNDING_CAPACITY_BENCHMARK, FUNDING_COVERAGE_BENCHMARK_MONTHS,
+    FUNDING_PARTNER_BENCHMARK, FUNDING_MATURITY_BENCHMARK_MONTHS,
+    ORIGINATION_GROWTH_NEUTRAL, ORIGINATION_PRODUCT_BENCHMARK,
+    MACRO_FED_SCALING, MACRO_HY_SPREAD_NEUTRAL_BPS, MACRO_HY_SPREAD_SCALING,
+    MACRO_UNEMPLOYMENT_SCALING, MACRO_DELINQUENCY_SCALING,
+    VALUATION_PS_MEDIAN_DEFAULT, VALUATION_PS_PEERS_SCALING,
+    VALUATION_EV_REV_SCALING, VALUATION_GROWTH_ADJ_SCALING,
+    NEWS_SENTIMENT_SCALING, NEWS_RISK_ADJUSTMENT,
+    TRADE_QUALITY_CONFIDENCE_FLOOR, TRADE_QUALITY_BULLISH_THRESHOLD,
+    TRADE_QUALITY_BEARISH_THRESHOLD, COMPOSITE_CONFIDENCE_FLOOR,
+    FRAGILITY_STALE_PENALTY, FRAGILITY_MAX_STALE_PENALTY, FRAGILITY_BASE,
+)
 
 
 @dataclass
@@ -79,16 +92,20 @@ class ScoringEngine:
         weights = {"capacity": 0.25, "coverage": 0.20, "diversification": 0.15,
                     "maturity": 0.15, "renewal": 0.15, "covenants": 0.10}
 
-        components["capacity"] = min(100, data.get("total_committed", 0) / 3 * 100)  # $3B = 100
-        components["coverage"] = min(100, data.get("months_coverage", 0) / 24 * 100)  # 24mo = 100
-        components["diversification"] = min(100, data.get("partner_count", 0) / 10 * 100)
-        components["maturity"] = min(100, data.get("avg_months_to_maturity", 0) / 36 * 100)
-        components["renewal"] = min(100, max(0, data.get("avg_renewal_prob", 0.5) * 100))
+        components["capacity"] = min(100, max(0, data.get("total_committed", 0) / FUNDING_CAPACITY_BENCHMARK * 100))
+        components["coverage"] = min(100, max(0, data.get("months_coverage", 0) / FUNDING_COVERAGE_BENCHMARK_MONTHS * 100))
+        components["diversification"] = min(100, max(0, data.get("partner_count", 0) / FUNDING_PARTNER_BENCHMARK * 100))
+        components["maturity"] = min(100, max(0, data.get("avg_months_to_maturity", 0) / FUNDING_MATURITY_BENCHMARK_MONTHS * 100))
+        # Renewal probability: accept both decimal (0-1) and percentage (0-100)
+        renewal = data.get("avg_renewal_prob", 0.5)
+        if renewal > 1.0:
+            renewal = renewal / 100.0  # Convert percentage to decimal
+        components["renewal"] = min(100, max(0, renewal * 100))
         components["covenants"] = 100 if not data.get("has_covenant_issues") else 30
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
-            name="funding_strength", value=round(value, 2),
+            name="funding_strength", value=round(max(0, min(100, value)), 2),
             components=components, weights=weights,
             explanation=f"Funding strength based on {len(weights)} factors",
         )
@@ -108,17 +125,17 @@ class ScoringEngine:
         components = {}
         weights = {"qoq": 0.30, "yoy": 0.25, "volume": 0.20, "accel": 0.15, "diversification": 0.10}
 
-        qoq = data.get("qoq_growth", 0)
-        yoy = data.get("yoy_growth", 0)
-        components["qoq"] = max(0, min(100, 50 + qoq * 100))
-        components["yoy"] = max(0, min(100, 50 + yoy * 100))
-        components["volume"] = min(100, data.get("volume_index", 50))
+        qoq = max(-1.0, min(1.0, data.get("qoq_growth", 0)))  # Clamp to ±100%
+        yoy = max(-1.0, min(1.0, data.get("yoy_growth", 0)))
+        components["qoq"] = max(0, min(100, ORIGINATION_GROWTH_NEUTRAL + qoq * 100))
+        components["yoy"] = max(0, min(100, ORIGINATION_GROWTH_NEUTRAL + yoy * 100))
+        components["volume"] = min(100, max(0, data.get("volume_index", 50)))
         components["accel"] = 70 if data.get("accelerating") else 30
-        components["diversification"] = min(100, data.get("product_count", 1) / 4 * 100)
+        components["diversification"] = min(100, max(0, data.get("product_count", 1) / ORIGINATION_PRODUCT_BENCHMARK * 100))
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
-            name="origination_momentum", value=round(value, 2),
+            name="origination_momentum", value=round(max(0, min(100, value)), 2),
             components=components, weights=weights,
         )
 
@@ -139,18 +156,19 @@ class ScoringEngine:
         weights = {"fed": 0.20, "curve": 0.15, "hy": 0.20,
                     "unemp": 0.15, "recession": 0.15, "lending": 0.15}
 
-        fed = data.get("fed_funds", 5.0)
-        components["fed"] = min(100, fed * 15)  # 5% = 75, 6.5% = ~100
+        fed = max(0, min(10, data.get("fed_funds", 5.0)))  # Clamp 0-10%
+        components["fed"] = min(100, fed * MACRO_FED_SCALING)
         components["curve"] = 80 if data.get("yield_curve_inverted") else 30
-        hy_spread = data.get("hy_spread", 350)
-        components["hy"] = min(100, max(0, (hy_spread - 200) / 4))
-        components["unemp"] = min(100, data.get("unemployment", 4.0) * 15)
-        components["recession"] = min(100, data.get("recession_prob", 20))
+        hy_spread = max(0, min(2000, data.get("hy_spread", 350)))  # Clamp 0-2000bps
+        components["hy"] = min(100, max(0, (hy_spread - MACRO_HY_SPREAD_NEUTRAL_BPS) / MACRO_HY_SPREAD_SCALING))
+        unemp = max(0, min(20, data.get("unemployment", 4.0)))  # Clamp 0-20%
+        components["unemp"] = min(100, unemp * MACRO_UNEMPLOYMENT_SCALING)
+        components["recession"] = min(100, max(0, data.get("recession_prob", 20)))
         components["lending"] = min(100, max(0, data.get("lending_standards", 0) + 50))
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
-            name="macro_pressure", value=round(value, 2),
+            name="macro_pressure", value=round(max(0, min(100, value)), 2),
             components=components, weights=weights,
         )
 
@@ -168,14 +186,16 @@ class ScoringEngine:
         components = {}
         weights = {"delinquency": 0.30, "hy": 0.25, "lending": 0.25, "credit": 0.20}
 
-        components["delinquency"] = min(100, data.get("delinquency_rate", 2.5) * 25)
-        components["hy"] = min(100, max(0, (data.get("hy_spread", 350) - 200) / 4))
+        delinq = max(0, min(10, data.get("delinquency_rate", 2.5)))  # Clamp 0-10%
+        components["delinquency"] = min(100, delinq * MACRO_DELINQUENCY_SCALING)
+        hy_spread = max(0, min(2000, data.get("hy_spread", 350)))
+        components["hy"] = min(100, max(0, (hy_spread - MACRO_HY_SPREAD_NEUTRAL_BPS) / MACRO_HY_SPREAD_SCALING))
         components["lending"] = min(100, max(0, data.get("lending_standards", 0) + 50))
-        components["credit"] = max(0, 100 - data.get("consumer_credit_growth", 5) * 10)
+        components["credit"] = max(0, 100 - max(0, min(20, data.get("consumer_credit_growth", 5))) * 10)
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
-            name="credit_stress", value=round(value, 2),
+            name="credit_stress", value=round(max(0, min(100, value)), 2),
             components=components, weights=weights,
         )
 
@@ -196,18 +216,20 @@ class ScoringEngine:
         weights = {"ps_history": 0.25, "ps_peers": 0.20, "ev_rev": 0.15,
                     "growth_adj": 0.20, "fcf": 0.10, "fair_value": 0.10}
 
-        ps = data.get("price_to_sales", 5.0)
-        ps_hist_median = data.get("ps_median_3y", 8.0)
+        ps = max(0.1, data.get("price_to_sales", 5.0))  # Floor at 0.1 to avoid extreme ratios
+        ps_hist_median = max(0.1, data.get("ps_median_3y", VALUATION_PS_MEDIAN_DEFAULT))
         components["ps_history"] = min(100, max(0, (ps_hist_median - ps) / ps_hist_median * 100 + 50))
-        components["ps_peers"] = min(100, max(0, 100 - ps * 8))
-        components["ev_rev"] = min(100, max(0, 100 - data.get("ev_revenue", 6) * 8))
-        components["growth_adj"] = min(100, max(0, data.get("growth_rate", 20) / max(ps, 0.01) * 15))
+        components["ps_peers"] = min(100, max(0, 100 - ps * VALUATION_PS_PEERS_SCALING))
+        ev_rev = max(0, data.get("ev_revenue", 6))
+        components["ev_rev"] = min(100, max(0, 100 - ev_rev * VALUATION_EV_REV_SCALING))
+        growth = max(0, min(200, data.get("growth_rate", 20)))  # Clamp growth rate
+        components["growth_adj"] = min(100, max(0, growth / ps * VALUATION_GROWTH_ADJ_SCALING))
         components["fcf"] = min(100, max(0, data.get("fcf_yield", 0) * 10 + 50))
         components["fair_value"] = min(100, max(0, data.get("upside_to_fair", 0) + 50))
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
-            name="valuation_attractiveness", value=round(value, 2),
+            name="valuation_attractiveness", value=round(max(0, min(100, value)), 2),
             components=components, weights=weights,
         )
 
@@ -217,7 +239,7 @@ class ScoringEngine:
             return ScoreResult(name="technical_strength", value=50.0, confidence=0.3)
         return ScoreResult(
             name="technical_strength",
-            value=data.get("technical_strength_score", 50.0),
+            value=max(0, min(100, data.get("technical_strength_score", 50.0))),
             explanation="Computed by TechnicalEngine",
         )
 
@@ -226,7 +248,7 @@ class ScoringEngine:
             return ScoreResult(name="options_sentiment", value=50.0, confidence=0.3)
         return ScoreResult(
             name="options_sentiment",
-            value=data.get("options_sentiment_score", 50.0),
+            value=max(0, min(100, data.get("options_sentiment_score", 50.0))),
             explanation="Computed by OptionsEngine",
         )
 
@@ -235,7 +257,7 @@ class ScoringEngine:
             return ScoreResult(name="short_opportunity", value=50.0, confidence=0.3)
         return ScoreResult(
             name="short_opportunity",
-            value=data.get("short_opportunity_score", 50.0),
+            value=max(0, min(100, data.get("short_opportunity_score", 50.0))),
         )
 
     def _squeeze_risk(self, data: dict | None) -> ScoreResult:
@@ -243,7 +265,7 @@ class ScoringEngine:
             return ScoreResult(name="squeeze_risk", value=50.0, confidence=0.3)
         return ScoreResult(
             name="squeeze_risk",
-            value=data.get("squeeze_risk_score", 50.0),
+            value=max(0, min(100, data.get("squeeze_risk_score", 50.0))),
         )
 
     def _news_regime(self, data: dict | None) -> ScoreResult:
@@ -257,14 +279,14 @@ class ScoringEngine:
         if not data:
             return ScoreResult(name="news_regime", value=50.0, confidence=0.3)
 
-        avg_sent = data.get("avg_sentiment", 0)
-        score = 50 + avg_sent * 50  # -1..+1 → 0..100
+        avg_sent = max(-1, min(1, data.get("avg_sentiment", 0)))  # Clamp to [-1, 1]
+        score = 50 + avg_sent * NEWS_SENTIMENT_SCALING
         if data.get("policy_risk"):
-            score -= 10
+            score -= NEWS_RISK_ADJUSTMENT
         if data.get("world_risk"):
-            score -= 10
+            score -= NEWS_RISK_ADJUSTMENT
         if data.get("positive_funding_news"):
-            score += 10
+            score += NEWS_RISK_ADJUSTMENT
         return ScoreResult(name="news_regime", value=round(max(0, min(100, score)), 2))
 
     def _forecast_confidence(self, data: dict | None) -> ScoreResult:
@@ -272,7 +294,7 @@ class ScoringEngine:
             return ScoreResult(name="forecast_confidence", value=50.0, confidence=0.3)
         return ScoreResult(
             name="forecast_confidence",
-            value=data.get("confidence_score", 50.0),
+            value=max(0, min(100, data.get("confidence_score", 50.0))),
         )
 
     def _relative_strength_spy(self, data: dict | None) -> ScoreResult:
@@ -280,7 +302,7 @@ class ScoringEngine:
             return ScoreResult(name="relative_strength_spy", value=50.0, confidence=0.3)
         return ScoreResult(
             name="relative_strength_spy",
-            value=data.get("relative_strength_score", 50.0),
+            value=max(0, min(100, data.get("relative_strength_score", 50.0))),
         )
 
     def _trade_quality(self, scores: dict) -> ScoreResult:
@@ -290,13 +312,13 @@ class ScoringEngine:
         - Confidence level: 30%
         - Low fragility: 30%
         """
-        available = [s.value for s in scores.values() if s.confidence > 0.5]
+        available = [s.value for s in scores.values() if s.confidence > TRADE_QUALITY_CONFIDENCE_FLOOR]
         if not available:
             return ScoreResult(name="trade_quality", value=50.0, confidence=0.3)
 
         # How much do signals agree on direction?
-        bullish = sum(1 for v in available if v > 60)
-        bearish = sum(1 for v in available if v < 40)
+        bullish = sum(1 for v in available if v > TRADE_QUALITY_BULLISH_THRESHOLD)
+        bearish = sum(1 for v in available if v < TRADE_QUALITY_BEARISH_THRESHOLD)
         total = len(available)
         agreement = max(bullish, bearish) / total if total > 0 else 0.5
         avg_confidence = sum(s.confidence for s in scores.values()) / len(scores) if scores else 0.5
@@ -314,18 +336,31 @@ class ScoringEngine:
         Positioning Fragility Score (0-100): HIGH = FRAGILE.
         - Squeeze risk: 30%
         - Signal disagreement: 30%
-        - Stale data count: 20%
+        - Stale data count: 20% (capped)
         - Low confidence: 20%
         """
         squeeze = scores.get("squeeze_risk", ScoreResult(name="", value=50)).value
         trade_q = scores.get("trade_quality", ScoreResult(name="", value=50))
         agreement = trade_q.components.get("agreement", 50)
         stale_count = sum(1 for s in scores.values() if s.confidence < 0.5)
+        low_conf_avg = sum(1 for s in scores.values() if s.confidence < 0.5) / max(1, len(scores)) * 100
 
-        score = squeeze * 0.30 + (100 - agreement) * 0.30 + stale_count * 5 + 20
+        # Cap stale data penalty to prevent unbounded growth
+        stale_penalty = min(FRAGILITY_MAX_STALE_PENALTY, stale_count * FRAGILITY_STALE_PENALTY)
+
+        score = (squeeze * 0.30
+                 + (100 - agreement) * 0.30
+                 + stale_penalty * 0.20
+                 + low_conf_avg * 0.20)
         return ScoreResult(
             name="positioning_fragility",
             value=round(max(0, min(100, score)), 2),
+            components={
+                "squeeze_contribution": round(squeeze * 0.30, 2),
+                "disagreement_contribution": round((100 - agreement) * 0.30, 2),
+                "stale_data_penalty": round(stale_penalty, 2),
+                "low_confidence_pct": round(low_conf_avg, 2),
+            },
         )
 
     def _composite(self, scores: dict) -> ScoreResult:
@@ -340,7 +375,7 @@ class ScoringEngine:
 
         for name, weight in COMPOSITE_WEIGHTS.items():
             sr = scores.get(name)
-            if sr and sr.confidence > 0.3:
+            if sr and sr.confidence > COMPOSITE_CONFIDENCE_FLOOR:
                 val = sr.value
                 if weight < 0:
                     val = 100 - val  # Invert for negative-weight scores

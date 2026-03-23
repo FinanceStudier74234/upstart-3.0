@@ -8,6 +8,23 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 
+from backend.config.constants import (
+    TD_MIN_TRADE_QUALITY, TD_MIN_SIGNAL_AGREEMENT,
+    TD_COMPOSITE_BULLISH, TD_COMPOSITE_BEARISH,
+    TD_TECH_BUY_THRESHOLD, TD_OPTIONS_BUY_THRESHOLD,
+    TD_SQUEEZE_OPTIONS_THRESHOLD, TD_SHORT_OPP_THRESHOLD,
+    TD_BASE_POSITION_PCT, TD_MIN_POSITION_PCT, TD_MAX_POSITION_PCT,
+    TD_QUALITY_NORM,
+    TD_REGIME_CRISIS, TD_REGIME_HIGH_VOL, TD_REGIME_BEAR, TD_REGIME_BULL,
+    TD_ATR_TARGET_MULT, TD_ATR_STOP_MULT, TD_ATR_NEUTRAL_MULT,
+    TD_WIN_PROB_MIN, TD_WIN_PROB_MAX,
+    TD_COMPOSITE_PROB_SCALING, TD_AGREEMENT_BONUS_SCALING,
+    TD_QUALITY_BONUS_SCALING, TD_FRAGILITY_PENALTY_SCALING,
+    TD_HIGH_AGREEMENT, TD_HIGH_QUALITY, TD_LOW_FRAGILITY,
+    TD_FALLBACK_STOP_PCT,
+    TRADE_QUALITY_BULLISH_THRESHOLD, TRADE_QUALITY_BEARISH_THRESHOLD,
+)
+
 
 @dataclass
 class TradeRecommendation:
@@ -78,7 +95,6 @@ class TradeDecisionEngine:
         # ── HMM Regime Context ──
         regime_context = ""
         if hmm_regime:
-            regime_probs = hmm_regime.get("regime_probs", [])
             current_regime = hmm_regime.get("current_regime")
             regime_names = ["bull", "neutral", "bear"]
             if isinstance(current_regime, int) and current_regime < len(regime_names):
@@ -100,7 +116,6 @@ class TradeDecisionEngine:
         # Behavioral overrides / adjustments
         if behavioral:
             if behavioral.get("capitulation_detected"):
-                # Capitulation = potential reversal opportunity
                 if behavioral.get("capitulation_type") == "long_capitulation":
                     rec.risk_factors.append("Long capitulation detected — potential reversal buy signal")
                 elif behavioral.get("capitulation_type") == "short_capitulation":
@@ -115,30 +130,35 @@ class TradeDecisionEngine:
         composite_val = composite.value if hasattr(composite, "value") else composite.get("value", 50)
         tech_val = self._sv(scores, "technical_strength")
         options_val = self._sv(scores, "options_sentiment")
-        short_opp = self._sv(scores, "short_opportunity")
         squeeze_val = self._sv(scores, "squeeze_risk")
         trade_q = self._sv(scores, "trade_quality")
         fragility = self._sv(scores, "positioning_fragility")
-        funding_val = self._sv(scores, "funding_strength")
-        macro_val = self._sv(scores, "macro_pressure")
 
         rec.trade_quality_score = trade_q
         rec.fragility_score = fragility
 
         # ── Signal Agreement ──
-        bullish_signals = sum(1 for k, v in self._score_values(scores).items()
-                              if v > 60 and k not in ("macro_pressure", "credit_stress", "squeeze_risk", "positioning_fragility"))
-        bearish_signals = sum(1 for k, v in self._score_values(scores).items()
-                              if v < 40 and k not in ("macro_pressure", "credit_stress", "squeeze_risk", "positioning_fragility"))
-        total_signals = len(scores)
-        rec.signal_agreement_pct = round(max(bullish_signals, bearish_signals) / total_signals * 100, 1) if total_signals > 0 else 0
+        # Count all scores for agreement, but exclude inverse-direction scores
+        inverse_scores = {"macro_pressure", "credit_stress", "squeeze_risk", "positioning_fragility"}
+        score_vals = self._score_values(scores)
+        directional_scores = {k: v for k, v in score_vals.items() if k not in inverse_scores}
+        bullish_signals = sum(1 for v in directional_scores.values() if v > TRADE_QUALITY_BULLISH_THRESHOLD)
+        bearish_signals = sum(1 for v in directional_scores.values() if v < TRADE_QUALITY_BEARISH_THRESHOLD)
+        # Use directional count for agreement, not total (avoids inflation)
+        directional_count = len(directional_scores)
+        rec.signal_agreement_pct = round(
+            max(bullish_signals, bearish_signals) / directional_count * 100, 1
+        ) if directional_count > 0 else 0
 
         # ── Meta-Decision: Should we trade at all? ──
-        if trade_q < 30 or rec.signal_agreement_pct < 30:
+        if trade_q < TD_MIN_TRADE_QUALITY or rec.signal_agreement_pct < TD_MIN_SIGNAL_AGREEMENT:
             rec.action = "no_trade"
             rec.vehicle = "no_vehicle"
             rec.explanation = "Signal conflict or low trade quality. No clear edge detected."
-            rec.what_would_change = "Need >60% signal agreement and trade quality >30 to consider action."
+            rec.what_would_change = (
+                f"Need >{TD_MIN_SIGNAL_AGREEMENT}% signal agreement and "
+                f"trade quality >{TD_MIN_TRADE_QUALITY} to consider action."
+            )
             rec.confidence = "low"
             return rec
 
@@ -149,12 +169,10 @@ class TradeDecisionEngine:
         rec._regime_context = regime_context
         rec._vol_regime = vol_regime
 
-        if composite_val > 65 and bullish_signals > bearish_signals:
-            # BULLISH
+        if composite_val > TD_COMPOSITE_BULLISH and bullish_signals > bearish_signals:
             rec = self._bullish_decision(rec, scores, technical, options, price)
             factors = self._collect_bullish_factors(scores)
-        elif composite_val < 35 or bearish_signals > bullish_signals:
-            # BEARISH
+        elif composite_val < TD_COMPOSITE_BEARISH or bearish_signals > bullish_signals:
             rec = self._bearish_decision(rec, scores, short, options, technical, price, squeeze_val)
             factors = self._collect_bearish_factors(scores)
         else:
@@ -164,14 +182,14 @@ class TradeDecisionEngine:
             rec.explanation = "Mixed signals. Composite near neutral."
             if price > 0:
                 atr = technical.get("atr", price * 0.04) if technical else price * 0.04
-                rec.stop_price = round(price - atr * 2, 2)
-                rec.target_price = round(price + atr * 2, 2)
+                rec.stop_price = round(price - atr * TD_ATR_NEUTRAL_MULT, 2)
+                rec.target_price = round(price + atr * TD_ATR_NEUTRAL_MULT, 2)
             factors = [{"factor": "mixed_signals", "weight": 1.0, "detail": f"Composite={composite_val:.1f}"}]
 
         rec.dominant_factors = sorted(factors, key=lambda x: abs(x.get("weight", 0)), reverse=True)[:5]
 
         # ── Confidence ──
-        if rec.signal_agreement_pct > 70 and trade_q > 60 and fragility < 40:
+        if rec.signal_agreement_pct > TD_HIGH_AGREEMENT and trade_q > TD_HIGH_QUALITY and fragility < TD_LOW_FRAGILITY:
             rec.confidence = "high"
         elif rec.signal_agreement_pct > 50 and trade_q > 40:
             rec.confidence = "moderate"
@@ -190,11 +208,11 @@ class TradeDecisionEngine:
         tech_val = self._sv(scores, "technical_strength")
         options_val = self._sv(scores, "options_sentiment")
 
-        if tech_val > 70:
+        if tech_val > TD_TECH_BUY_THRESHOLD:
             rec.action = "buy"
             rec.vehicle = "common_stock"
             rec.explanation = "Strong bullish technicals with positive composite score."
-        elif options_val > 65:
+        elif options_val > TD_OPTIONS_BUY_THRESHOLD:
             rec.action = "buy_calls"
             rec.vehicle = "call_option"
             rec.explanation = "Bullish options flow supports call purchase."
@@ -204,10 +222,9 @@ class TradeDecisionEngine:
             rec.explanation = "Moderate bullish signal. Spread limits risk."
 
         if price > 0:
-            # Approximate levels
             atr = technical.get("atr", price * 0.04) if technical else price * 0.04
-            rec.target_price = round(price + atr * 3, 2)
-            rec.stop_price = round(price - atr * 1.5, 2)
+            rec.target_price = round(price + atr * TD_ATR_TARGET_MULT, 2)
+            rec.stop_price = round(price - atr * TD_ATR_STOP_MULT, 2)
             if rec.stop_price < price:
                 rec.reward_risk_ratio = round((rec.target_price - price) / (price - rec.stop_price), 2)
                 if rec.reward_risk_ratio > 0:
@@ -221,8 +238,7 @@ class TradeDecisionEngine:
         return rec
 
     def _bearish_decision(self, rec, scores, short, options, technical, price, squeeze_val):
-        if squeeze_val > 70:
-            # High squeeze risk — use options, not direct short
+        if squeeze_val > TD_SQUEEZE_OPTIONS_THRESHOLD:
             rec.action = "buy_puts"
             rec.vehicle = "put_option"
             rec.explanation = "Bearish thesis but squeeze risk is elevated. Using puts to limit upside risk."
@@ -230,7 +246,7 @@ class TradeDecisionEngine:
             rec.action = "bear_spread"
             rec.vehicle = "put_spread"
             rec.explanation = "Do-not-short flag active. Using put spread for defined risk."
-        elif self._sv(scores, "short_opportunity") > 65:
+        elif self._sv(scores, "short_opportunity") > TD_SHORT_OPP_THRESHOLD:
             rec.action = "short"
             rec.vehicle = "short_stock"
             rec.explanation = "Strong short opportunity with manageable squeeze risk."
@@ -241,8 +257,8 @@ class TradeDecisionEngine:
 
         if price > 0:
             atr = technical.get("atr", price * 0.04) if technical else price * 0.04
-            rec.target_price = round(price - atr * 3, 2)
-            rec.stop_price = round(price + atr * 1.5, 2)
+            rec.target_price = round(price - atr * TD_ATR_TARGET_MULT, 2)
+            rec.stop_price = round(price + atr * TD_ATR_STOP_MULT, 2)
             rec.invalidation_price = rec.stop_price
             if rec.stop_price > price:
                 rec.reward_risk_ratio = round((price - rec.target_price) / (rec.stop_price - price), 2)
@@ -258,42 +274,35 @@ class TradeDecisionEngine:
 
     def _size_position(self, scores, rec) -> float:
         """Regime-aware, volatility-targeted, capped quarter-Kelly sizing."""
-        base = 5.0  # 5% base position
-        # Reduce for low quality
-        quality_adj = min(1.0, rec.trade_quality_score / 60)
-        # Reduce for high fragility
+        base = TD_BASE_POSITION_PCT
+        quality_adj = min(1.0, rec.trade_quality_score / TD_QUALITY_NORM)
         frag_adj = max(0.3, 1.0 - rec.fragility_score / 100)
-        # Regime adjustment: reduce in bear/crisis, hold steady in bull
         regime_adj = 1.0
         regime = getattr(rec, "_regime_context", "")
         vol_regime = getattr(rec, "_vol_regime", "")
         if vol_regime == "crisis_vol":
-            regime_adj = 0.4
+            regime_adj = TD_REGIME_CRISIS
         elif vol_regime == "high_vol":
-            regime_adj = 0.6
+            regime_adj = TD_REGIME_HIGH_VOL
         elif regime == "bear":
-            regime_adj = 0.7
+            regime_adj = TD_REGIME_BEAR
         elif regime == "bull":
-            regime_adj = 1.1
+            regime_adj = TD_REGIME_BULL
         size = base * quality_adj * frag_adj * regime_adj
-        return round(max(1.0, min(10.0, size)), 2)
+        return round(max(TD_MIN_POSITION_PCT, min(TD_MAX_POSITION_PCT, size)), 2)
 
     def _estimate_win_prob(self, scores: dict, rec, bullish: bool) -> float:
         """Multi-factor win probability combining composite, agreement, and quality."""
         composite = self._sv(scores, "composite_opportunity")
-        # Base directional component from composite (±0.25 range)
         if bullish:
-            base_prob = 0.5 + (composite - 50) / 200
+            base_prob = 0.5 + (composite - 50) / TD_COMPOSITE_PROB_SCALING
         else:
-            base_prob = 0.5 + (50 - composite) / 200
-        # Agreement bonus: high signal agreement → higher confidence in direction
-        agreement_bonus = (rec.signal_agreement_pct - 50) / 500 if rec.signal_agreement_pct > 50 else 0
-        # Quality bonus: high trade quality → historically better outcomes
-        quality_bonus = (rec.trade_quality_score - 50) / 500 if rec.trade_quality_score > 50 else 0
-        # Fragility penalty: high fragility → less reliable signal
-        fragility_penalty = max(0, (rec.fragility_score - 50)) / 500
+            base_prob = 0.5 + (50 - composite) / TD_COMPOSITE_PROB_SCALING
+        agreement_bonus = (rec.signal_agreement_pct - 50) / TD_AGREEMENT_BONUS_SCALING if rec.signal_agreement_pct > 50 else 0
+        quality_bonus = (rec.trade_quality_score - 50) / TD_QUALITY_BONUS_SCALING if rec.trade_quality_score > 50 else 0
+        fragility_penalty = max(0, (rec.fragility_score - 50)) / TD_FRAGILITY_PENALTY_SCALING
         win_prob = base_prob + agreement_bonus + quality_bonus - fragility_penalty
-        return max(0.15, min(0.85, win_prob))
+        return max(TD_WIN_PROB_MIN, min(TD_WIN_PROB_MAX, win_prob))
 
     @staticmethod
     def _compute_max_loss_pct(price: float, stop_price: float | None, position_pct: float | None, long: bool) -> float:
@@ -304,9 +313,9 @@ class TradeDecisionEngine:
             elif not long and stop_price > price:
                 stop_dist = (stop_price - price) / price
             else:
-                stop_dist = 0.02  # fallback: 2% stop distance
+                stop_dist = TD_FALLBACK_STOP_PCT
             return round(stop_dist * (position_pct / 100) * 100, 2)
-        return round((position_pct or 5.0) * 0.02, 2)  # fallback: 2% stop on position
+        return round((position_pct or TD_BASE_POSITION_PCT) * TD_FALLBACK_STOP_PCT, 2)
 
     def _sv(self, scores: dict, name: str) -> float:
         """Safely get score value."""
@@ -320,29 +329,29 @@ class TradeDecisionEngine:
 
     def _collect_bullish_factors(self, scores: dict) -> list[dict]:
         factors = []
-        if self._sv(scores, "technical_strength") > 60:
+        if self._sv(scores, "technical_strength") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "technical_strength", "weight": 0.8, "direction": "bullish"})
-        if self._sv(scores, "funding_strength") > 60:
+        if self._sv(scores, "funding_strength") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "funding_strength", "weight": 0.7, "direction": "bullish"})
-        if self._sv(scores, "origination_momentum") > 60:
+        if self._sv(scores, "origination_momentum") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "origination_momentum", "weight": 0.7, "direction": "bullish"})
-        if self._sv(scores, "options_sentiment") > 60:
+        if self._sv(scores, "options_sentiment") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "options_sentiment", "weight": 0.6, "direction": "bullish"})
-        if self._sv(scores, "relative_strength_spy") > 60:
+        if self._sv(scores, "relative_strength_spy") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "relative_strength_spy", "weight": 0.5, "direction": "bullish"})
         return factors
 
     def _collect_bearish_factors(self, scores: dict) -> list[dict]:
         factors = []
-        if self._sv(scores, "technical_strength") < 40:
+        if self._sv(scores, "technical_strength") < TRADE_QUALITY_BEARISH_THRESHOLD:
             factors.append({"factor": "technical_weakness", "weight": -0.8, "direction": "bearish"})
-        if self._sv(scores, "macro_pressure") > 60:
+        if self._sv(scores, "macro_pressure") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "macro_pressure", "weight": -0.7, "direction": "bearish"})
-        if self._sv(scores, "credit_stress") > 60:
+        if self._sv(scores, "credit_stress") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "credit_stress", "weight": -0.7, "direction": "bearish"})
-        if self._sv(scores, "short_opportunity") > 60:
+        if self._sv(scores, "short_opportunity") > TRADE_QUALITY_BULLISH_THRESHOLD:
             factors.append({"factor": "short_opportunity", "weight": -0.6, "direction": "bearish"})
-        if self._sv(scores, "options_sentiment") < 40:
+        if self._sv(scores, "options_sentiment") < TRADE_QUALITY_BEARISH_THRESHOLD:
             factors.append({"factor": "bearish_options_flow", "weight": -0.6, "direction": "bearish"})
         return factors
 
@@ -361,10 +370,10 @@ class TradeDecisionEngine:
     def _what_would_change(self, rec, scores) -> str:
         changes = []
         if rec.action in ("buy", "buy_calls", "bull_spread"):
-            changes.append("Would switch to SELL/SHORT if technical_strength drops below 40")
-            changes.append("Would reduce size if squeeze_risk rises above 70")
+            changes.append(f"Would switch to SELL/SHORT if technical_strength drops below {TRADE_QUALITY_BEARISH_THRESHOLD}")
+            changes.append(f"Would reduce size if squeeze_risk rises above {TD_SQUEEZE_OPTIONS_THRESHOLD}")
         elif rec.action in ("short", "buy_puts", "bear_spread"):
-            changes.append("Would COVER if technical_strength rises above 65")
-            changes.append("Would switch to PUTS if squeeze_risk rises above 70")
-        changes.append("Would go to NO_TRADE if trade_quality drops below 30")
+            changes.append(f"Would COVER if technical_strength rises above {TD_TECH_BUY_THRESHOLD - 5}")
+            changes.append(f"Would switch to PUTS if squeeze_risk rises above {TD_SQUEEZE_OPTIONS_THRESHOLD}")
+        changes.append(f"Would go to NO_TRADE if trade_quality drops below {TD_MIN_TRADE_QUALITY}")
         return "; ".join(changes)
