@@ -4,12 +4,12 @@ import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cell,
+  ComposedChart, Area, Line, ReferenceLine,
 } from 'recharts'
 
 export default function ExecutiveDashboard({ analysis }) {
   const isMockData = analysis?.data_sources && Object.values(analysis.data_sources).some(s => s === 'mock')
-  const hasWarnings = analysis?.warnings?.length > 0
 
   if (!analysis) return (
     <div className="space-y-4">
@@ -56,6 +56,41 @@ export default function ExecutiveDashboard({ analysis }) {
     })
   }, [scores])
 
+  // Trade levels data for visual entry/target/stop chart
+  const tradeLevelsData = useMemo(() => {
+    if (!decision.entry_price) return null
+    const entry = decision.entry_price
+    const target = decision.target_price
+    const stop = decision.stop_price
+    if (!target || !stop) return null
+    const isBullish = target > entry
+    const allPrices = [entry, target, stop].filter(Boolean)
+    const min = Math.min(...allPrices) * 0.98
+    const max = Math.max(...allPrices) * 1.02
+    return { entry, target, stop, min, max, isBullish }
+  }, [decision])
+
+  // Forecast cone data
+  const forecastConeData = useMemo(() => {
+    if (!fc.models || !price) return []
+    const models = fc.models || []
+    const points = models.map(m => ({
+      name: m.name?.replace(/Engine|Model/g, '').trim() || 'Unknown',
+      lower: m.lower,
+      point: m.point,
+      upper: m.upper,
+    })).filter(m => m.point != null)
+    if (fc.ensemble_point) {
+      points.push({
+        name: 'Ensemble',
+        lower: fc.ensemble_lower,
+        point: fc.ensemble_point,
+        upper: fc.ensemble_upper,
+      })
+    }
+    return points
+  }, [fc, price])
+
   const CustomTooltipStyle = {
     backgroundColor: '#1f2937',
     border: '1px solid #374151',
@@ -99,7 +134,7 @@ export default function ExecutiveDashboard({ analysis }) {
         <Panel><Stat label="ATM IV" value={options?.atm_iv ? `${(options.atm_iv * 100).toFixed(0)}%` : '--'} /></Panel>
       </div>
 
-      {/* Scores Grid */}
+      {/* Scores Grid — with expandable component breakdown */}
       <Panel title="Composite Scores">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
           {scores && Object.entries(scores).map(([k, v]) => (
@@ -108,6 +143,8 @@ export default function ExecutiveDashboard({ analysis }) {
               label={k.replace(/_/g, ' ')}
               value={v?.value}
               inverted={invertedScores.includes(k)}
+              components={v?.components}
+              confidence={v?.confidence}
             />
           ))}
         </div>
@@ -196,7 +233,7 @@ export default function ExecutiveDashboard({ analysis }) {
         )}
       </Panel>
 
-      {/* Trade Decision Panel */}
+      {/* Trade Decision + Trade Levels Visual */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Panel title="Trade Decision">
           <div className="space-y-2 text-xs">
@@ -221,32 +258,117 @@ export default function ExecutiveDashboard({ analysis }) {
           </div>
         </Panel>
 
-        <Panel title="SPY Relationship">
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            <div><span className="text-terminal-muted">Beta:</span> {spy_relationship?.beta?.toFixed(3)}</div>
-            <div><span className="text-terminal-muted">Correlation:</span> {spy_relationship?.correlation?.toFixed(3)}</div>
-            <div><span className="text-terminal-muted">Alpha (ann):</span> {spy_relationship?.alpha_annualized?.toFixed(3)}</div>
-            <div><span className="text-terminal-muted">R²:</span> {spy_relationship?.pct_market_driven?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">Upside Capture:</span> {spy_relationship?.upside_capture?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">Downside Capture:</span> {spy_relationship?.downside_capture?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">Regime:</span> {spy_relationship?.regime}</div>
-            <div><span className="text-terminal-muted">Ratio Trend:</span> {spy_relationship?.ratio_trend}</div>
-            <div><span className="text-terminal-muted">UPST DD:</span> {spy_relationship?.upst_drawdown_current?.toFixed(1)}%</div>
-            <div><span className="text-terminal-muted">SPY DD:</span> {spy_relationship?.spy_drawdown_current?.toFixed(1)}%</div>
-          </div>
-        </Panel>
+        {/* Trade Levels Visual */}
+        {tradeLevelsData ? (
+          <Panel title="Trade Levels">
+            <div className="relative h-48 flex items-stretch">
+              {/* Price axis */}
+              <div className="flex flex-col justify-between w-full relative">
+                {/* Target zone */}
+                <div className="absolute left-0 right-0" style={{
+                  top: `${(1 - (tradeLevelsData.target - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                }}>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-px flex-1 ${tradeLevelsData.isBullish ? 'bg-terminal-green' : 'bg-terminal-red'}`} />
+                    <span className={`text-[10px] font-bold ${tradeLevelsData.isBullish ? 'text-terminal-green' : 'text-terminal-red'}`}>
+                      TARGET ${tradeLevelsData.target.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                {/* Entry zone */}
+                <div className="absolute left-0 right-0" style={{
+                  top: `${(1 - (tradeLevelsData.entry - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                }}>
+                  <div className="flex items-center gap-2">
+                    <div className="h-px flex-1 bg-terminal-cyan border-dashed" />
+                    <span className="text-[10px] font-bold text-terminal-cyan">
+                      ENTRY ${tradeLevelsData.entry.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                {/* Stop zone */}
+                <div className="absolute left-0 right-0" style={{
+                  top: `${(1 - (tradeLevelsData.stop - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                }}>
+                  <div className="flex items-center gap-2">
+                    <div className={`h-px flex-1 ${tradeLevelsData.isBullish ? 'bg-terminal-red' : 'bg-terminal-green'}`} />
+                    <span className={`text-[10px] font-bold ${tradeLevelsData.isBullish ? 'text-terminal-red' : 'text-terminal-green'}`}>
+                      STOP ${tradeLevelsData.stop.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+                {/* Reward/Risk zones with gradient */}
+                <div className="absolute left-4 w-8 rounded opacity-30" style={{
+                  top: `${(1 - (Math.max(tradeLevelsData.entry, tradeLevelsData.target) - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                  bottom: `${((Math.min(tradeLevelsData.entry, tradeLevelsData.target) - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                  backgroundColor: tradeLevelsData.isBullish ? '#10b981' : '#ef4444',
+                }} />
+                <div className="absolute left-4 w-8 rounded opacity-30" style={{
+                  top: `${(1 - (Math.max(tradeLevelsData.entry, tradeLevelsData.stop) - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                  bottom: `${((Math.min(tradeLevelsData.entry, tradeLevelsData.stop) - tradeLevelsData.min) / (tradeLevelsData.max - tradeLevelsData.min)) * 100}%`,
+                  backgroundColor: tradeLevelsData.isBullish ? '#ef4444' : '#10b981',
+                }} />
+              </div>
+            </div>
+            {decision.reward_risk_ratio && (
+              <div className="mt-2 text-center text-xs text-terminal-muted">
+                Reward:Risk = <span className="font-bold text-terminal-cyan">{decision.reward_risk_ratio.toFixed(2)}:1</span>
+                {decision.expected_value != null && (
+                  <span className="ml-3">EV = <span className={decision.expected_value >= 0 ? 'text-terminal-green' : 'text-terminal-red'}>
+                    ${decision.expected_value.toFixed(2)}
+                  </span></span>
+                )}
+              </div>
+            )}
+          </Panel>
+        ) : (
+          <Panel title="SPY Relationship">
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <div><span className="text-terminal-muted">Beta:</span> {spy_relationship?.beta?.toFixed(3)}</div>
+              <div><span className="text-terminal-muted">Correlation:</span> {spy_relationship?.correlation?.toFixed(3)}</div>
+              <div><span className="text-terminal-muted">Alpha (ann):</span> {spy_relationship?.alpha_annualized?.toFixed(3)}</div>
+              <div><span className="text-terminal-muted">R²:</span> {spy_relationship?.pct_market_driven?.toFixed(1)}%</div>
+              <div><span className="text-terminal-muted">Upside Capture:</span> {spy_relationship?.upside_capture?.toFixed(1)}%</div>
+              <div><span className="text-terminal-muted">Downside Capture:</span> {spy_relationship?.downside_capture?.toFixed(1)}%</div>
+              <div><span className="text-terminal-muted">Regime:</span> {spy_relationship?.regime}</div>
+              <div><span className="text-terminal-muted">Ratio Trend:</span> {spy_relationship?.ratio_trend}</div>
+              <div><span className="text-terminal-muted">UPST DD:</span> {spy_relationship?.upst_drawdown_current?.toFixed(1)}%</div>
+              <div><span className="text-terminal-muted">SPY DD:</span> {spy_relationship?.spy_drawdown_current?.toFixed(1)}%</div>
+            </div>
+          </Panel>
+        )}
       </div>
 
-      {/* Forecast */}
+      {/* Forecast Cone Chart + Text */}
       <Panel title="Ensemble Forecast">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-xs mb-4">
           <Stat label="Point Estimate" value={fc.ensemble_point ? `$${fc.ensemble_point}` : '--'} />
           <Stat label="Lower (80%)" value={fc.ensemble_lower ? `$${fc.ensemble_lower}` : '--'} />
           <Stat label="Upper (80%)" value={fc.ensemble_upper ? `$${fc.ensemble_upper}` : '--'} />
           <Stat label="Model Agreement" value={fc.model_agreement ? `${(fc.model_agreement * 100).toFixed(0)}%` : '--'} />
           <Stat label="Confidence" value={fc.confidence_score?.toFixed(0)} />
         </div>
-        {fc.models && (
+        {forecastConeData.length > 0 && (
+          <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
+            <h3 className="text-xs font-bold text-gray-300 mb-2 uppercase tracking-wider">Model Forecast Comparison</h3>
+            <ResponsiveContainer width="100%" height={200}>
+              <ComposedChart data={forecastConeData} margin={{ top: 10, right: 30, left: 10, bottom: 5 }}>
+                <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} />
+                <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }}
+                  domain={['auto', 'auto']} tickFormatter={(v) => `$${v}`} />
+                <Tooltip contentStyle={CustomTooltipStyle} formatter={(val) => [`$${val?.toFixed(2)}`, '']} />
+                {price && <ReferenceLine y={price} stroke="#06b6d4" strokeDasharray="3 3"
+                  label={{ value: `Current $${price.toFixed(2)}`, fill: '#06b6d4', fontSize: 9, position: 'right' }} />}
+                <Area dataKey="lower" stackId="range" fill="transparent" stroke="transparent" />
+                <Area dataKey="upper" stackId="range" fill="#10b981" fillOpacity={0.15} stroke="transparent" />
+                <Line dataKey="point" stroke="#10b981" strokeWidth={2} dot={{ r: 4, fill: '#10b981' }} />
+                <Line dataKey="lower" stroke="#374151" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+                <Line dataKey="upper" stroke="#374151" strokeWidth={1} strokeDasharray="3 3" dot={false} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+        {fc.models && !forecastConeData.length && (
           <div className="mt-3 space-y-1">
             {fc.models.map((m, i) => (
               <div key={i} className="flex gap-4 text-[10px] text-terminal-muted">
