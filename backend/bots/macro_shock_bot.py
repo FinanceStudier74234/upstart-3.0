@@ -12,9 +12,9 @@ class MacroShockBot(BaseBot):
     name = "macro_shock"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
-        beta = params.get("beta", 1.5)
+        beta = max(-5.0, min(params.get("beta", 1.5), 5.0))
 
         scenarios = []
 
@@ -70,7 +70,7 @@ class MacroShockBot(BaseBot):
             unemp_impact = -ms["unemployment_change"] * 5  # Labor market effect on lending
 
             total_impact = spy_impact + rate_impact + credit_impact + unemp_impact
-            new_price = round(price * (1 + total_impact / 100), 2)
+            new_price = round(max(0.01, price * (1 + total_impact / 100)), 2)
 
             # Attractiveness changes
             long_attractive = total_impact > 5

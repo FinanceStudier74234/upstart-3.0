@@ -16,12 +16,13 @@ class OptionsReactionBot(BaseBot):
     name = "options_reaction"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
-        price_change_pct = params.get("price_change_pct", 0.0)
-        iv_change_pct = params.get("iv_change_pct", 0.0)
-        days_elapsed = params.get("days_elapsed", 7)
-        base_iv = params.get("base_iv", 0.70)
+        price_change_pct = max(-99, min(params.get("price_change_pct", 0.0), 500))
+        iv_change_pct = max(-95, min(params.get("iv_change_pct", 0.0), 500))
+        days_elapsed = max(0, min(params.get("days_elapsed", 7), 365))
+        base_iv = max(0.01, params.get("base_iv", 0.70))
+        self._rfr = params.get("risk_free_rate", 0.05)  # configurable risk-free rate
 
         new_price = max(0.01, price * (1 + price_change_pct / 100))
         new_iv = max(0.01, base_iv * (1 + iv_change_pct / 100))
@@ -61,7 +62,7 @@ class OptionsReactionBot(BaseBot):
         t = dte_new / 365
         atm_strike = min(strikes, key=lambda k: abs(k - s))
         if t > 0 and vol > 0:
-            d1 = (math.log(s / atm_strike) + (0.05 + vol**2 / 2) * t) / (vol * math.sqrt(t))
+            d1 = (math.log(s / atm_strike) + (self._rfr + vol**2 / 2) * t) / (vol * math.sqrt(t))
             delta_call = round(norm.cdf(d1), 4)
             delta_put = round(delta_call - 1, 4)
             gamma = round(norm.pdf(d1) / (s * vol * math.sqrt(t)), 6)
@@ -117,16 +118,17 @@ class OptionsReactionBot(BaseBot):
         )
 
     def _approx_option_price(self, s, k, vol, t, opt_type):
-        """Simplified Black-Scholes approximation."""
+        """Black-Scholes option pricing with configurable risk-free rate."""
         if t <= 0 or vol <= 0 or s <= 0 or k <= 0:
             if opt_type == "call":
                 return max(0, s - k)
             return max(0, k - s)
 
-        d1 = (math.log(s / k) + (0.05 + vol**2 / 2) * t) / (vol * math.sqrt(t))
+        rfr = getattr(self, "_rfr", 0.05)
+        d1 = (math.log(s / k) + (rfr + vol**2 / 2) * t) / (vol * math.sqrt(t))
         d2 = d1 - vol * math.sqrt(t)
 
         if opt_type == "call":
-            return max(0.01, s * norm.cdf(d1) - k * math.exp(-0.05 * t) * norm.cdf(d2))
+            return max(0.01, s * norm.cdf(d1) - k * math.exp(-rfr * t) * norm.cdf(d2))
         else:
-            return max(0.01, k * math.exp(-0.05 * t) * norm.cdf(-d2) - s * norm.cdf(-d1))
+            return max(0.01, k * math.exp(-rfr * t) * norm.cdf(-d2) - s * norm.cdf(-d1))

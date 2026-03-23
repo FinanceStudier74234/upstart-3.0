@@ -16,14 +16,14 @@ class PriceActionBot(BaseBot):
     name = "price_action_simulation"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
-        n_paths = max(1, params.get("n_paths", 1000))
-        horizon = max(1, params.get("horizon_days", 63))
+        n_paths = max(1, min(params.get("n_paths", 1000), 10_000))
+        horizon = max(1, min(params.get("horizon_days", 63), 504))
         mu = params.get("drift", 0.0)
-        sigma = params.get("volatility", 0.65)
-        beta = params.get("beta", 1.5)
-        spy_scenario = params.get("spy_return_pct", 0.0)
+        sigma = max(0.01, params.get("volatility", 0.65))
+        beta = max(-3.0, min(params.get("beta", 1.5), 5.0))
+        spy_scenario = max(-100, min(params.get("spy_return_pct", 0.0), 200))
 
         # Adjust drift for SPY scenario
         adj_mu = mu + beta * spy_scenario / 100 * 252 / horizon

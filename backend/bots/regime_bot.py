@@ -14,9 +14,9 @@ class RegimeBot(BaseBot):
     async def run(self, input: BotInput) -> BotOutput:
         params = input.scenario_params
         current_regime = params.get("current_regime", "normal")
-        vix = params.get("vix", 18)
+        vix = max(0, min(params.get("vix", 18), 150))
         spy_trend = params.get("spy_trend", "neutral")
-        credit_spread = params.get("credit_spread_bps", 350)
+        credit_spread = max(0, min(params.get("credit_spread_bps", 350), 2000))
 
         # Define regime characteristics
         regimes = {
@@ -73,6 +73,8 @@ class RegimeBot(BaseBot):
             detected = "risk_off"
         elif spy_trend in ("strong_up", "strong_down"):
             detected = "trend"
+        elif 20 <= vix <= 30 and spy_trend == "neutral":
+            detected = "chop"
         else:
             detected = current_regime
 
@@ -141,8 +143,14 @@ class RegimeBot(BaseBot):
         if credit_spread > 400:
             base["risk_off"] += 0.10
 
+        # Clamp negative values before normalization
+        base = {k: max(0, v) for k, v in base.items()}
         # Normalize
         total = sum(base.values())
+        if total <= 0:
+            # Fallback to uniform distribution
+            n = len(base)
+            return {k: 1.0 / n for k in base}
         return {k: v / total for k, v in base.items()}
 
     def _stability_score(self, transitions, current):

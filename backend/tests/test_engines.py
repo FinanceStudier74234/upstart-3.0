@@ -1236,3 +1236,271 @@ class TestTradeDecisionBotEdgeCases:
         assert c1 != c2  # Must differ for different conviction
         assert 0 < c1 < 1
         assert 0 < c2 < 1
+
+
+# ── Bot Edge Cases ──
+
+class TestPriceActionBotEdgeCases:
+    """Edge cases for price action simulation bot."""
+
+    def test_percentile_ordering(self):
+        from backend.bots.price_action_bot import PriceActionBot
+        from backend.bots.base_bot import BotInput
+        bot = PriceActionBot()
+        inp = BotInput(current_price=70.0, scenario_params={"n_paths": 500, "horizon_days": 20})
+        out = asyncio.run(bot.run(inp))
+        pcts = out.results["percentiles"]
+        assert pcts[5] <= pcts[25] <= pcts[50] <= pcts[75] <= pcts[95]
+
+    def test_probability_bounds(self):
+        from backend.bots.price_action_bot import PriceActionBot
+        from backend.bots.base_bot import BotInput
+        bot = PriceActionBot()
+        inp = BotInput(current_price=70.0, scenario_params={"n_paths": 200, "horizon_days": 10})
+        out = asyncio.run(bot.run(inp))
+        assert 0 <= out.results["probability_above_current"] <= 1
+        assert 0 <= out.results["probability_below_current"] <= 1
+
+    def test_zero_price_floor(self):
+        from backend.bots.price_action_bot import PriceActionBot
+        from backend.bots.base_bot import BotInput
+        bot = PriceActionBot()
+        inp = BotInput(current_price=-5.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["expected_price"] > 0
+
+    def test_extreme_volatility(self):
+        from backend.bots.price_action_bot import PriceActionBot
+        from backend.bots.base_bot import BotInput
+        bot = PriceActionBot()
+        inp = BotInput(current_price=70.0, scenario_params={"volatility": 0.001, "n_paths": 100, "horizon_days": 5})
+        out = asyncio.run(bot.run(inp))
+        # Low vol: median should be near current price
+        assert abs(out.results["percentiles"][50] - 70.0) < 10
+
+
+class TestOptionsReactionBotEdgeCases:
+    """Edge cases for options reaction bot."""
+
+    def test_greeks_bounds(self):
+        from backend.bots.options_reaction_bot import OptionsReactionBot
+        from backend.bots.base_bot import BotInput
+        bot = OptionsReactionBot()
+        inp = BotInput(current_price=70.0, scenario_params={"price_change_pct": 0, "iv_change_pct": 0})
+        out = asyncio.run(bot.run(inp))
+        g = out.results["greeks_summary"]
+        assert -1 <= g["delta_call"] <= 1
+        assert -1 <= g["delta_put"] <= 0
+        assert g["gamma"] >= 0
+        assert g["theta"] <= 0  # theta is always negative for long options
+
+    def test_deep_itm_call(self):
+        from backend.bots.options_reaction_bot import OptionsReactionBot
+        from backend.bots.base_bot import BotInput
+        bot = OptionsReactionBot()
+        inp = BotInput(current_price=70.0, scenario_params={"price_change_pct": 50, "iv_change_pct": 0})
+        out = asyncio.run(bot.run(inp))
+        # After +50% move, deep ITM calls should have significant value
+        calls = out.results["calls"]
+        assert any(c["new_price"] > c["base_price"] for c in calls)
+
+    def test_pl_surface_shape(self):
+        from backend.bots.options_reaction_bot import OptionsReactionBot
+        from backend.bots.base_bot import BotInput
+        bot = OptionsReactionBot()
+        inp = BotInput(current_price=70.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        surface = out.results["pl_surface"]
+        assert len(surface) == 5  # 5 price shifts
+        # Each row should have price_change_pct and iv change columns
+        for row in surface:
+            assert "price_change_pct" in row
+
+
+class TestSqueezeBotEdgeCases:
+    """Edge cases for short squeeze simulation bot."""
+
+    def test_scenario_ordering(self):
+        from backend.bots.squeeze_bot import SqueezeBot
+        from backend.bots.base_bot import BotInput
+        bot = SqueezeBot()
+        inp = BotInput(current_price=70.0, scenario_params={"short_pct_float": 25})
+        out = asyncio.run(bot.run(inp))
+        scenarios = out.results["scenarios"]
+        # Squeeze prices should increase with severity
+        prices = [s["squeeze_price"] for s in scenarios]
+        assert prices == sorted(prices)
+
+    def test_probability_sum_under_one(self):
+        from backend.bots.squeeze_bot import SqueezeBot
+        from backend.bots.base_bot import BotInput
+        bot = SqueezeBot()
+        inp = BotInput(current_price=70.0, scenario_params={"short_pct_float": 50})
+        out = asyncio.run(bot.run(inp))
+        total_prob = out.results["overall_squeeze_probability"]
+        assert 0 < total_prob < 1  # Can't be 100% certain of squeeze
+
+    def test_monte_carlo_paths(self):
+        from backend.bots.squeeze_bot import SqueezeBot
+        from backend.bots.base_bot import BotInput
+        bot = SqueezeBot()
+        inp = BotInput(current_price=70.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        mc = out.results["monte_carlo_squeeze_prices"]
+        assert mc[5] <= mc[50] <= mc[95]  # Percentile ordering
+
+
+class TestFundingStressBotEdgeCases:
+    """Edge cases for funding stress bot."""
+
+    def test_projected_price_never_negative(self):
+        from backend.bots.funding_stress_bot import FundingStressBot
+        from backend.bots.base_bot import BotInput
+        bot = FundingStressBot()
+        inp = BotInput(current_price=5.0, scenario_params={"facility_count": 1})
+        out = asyncio.run(bot.run(inp))
+        for s in out.results["scenarios"]:
+            assert s["projected_price"] > 0
+
+    def test_single_facility_max_loss(self):
+        from backend.bots.funding_stress_bot import FundingStressBot
+        from backend.bots.base_bot import BotInput
+        bot = FundingStressBot()
+        inp = BotInput(current_price=70.0, scenario_params={"facility_count": 1})
+        out = asyncio.run(bot.run(inp))
+        # With 1 facility, single non-renewal = 100% loss
+        single = out.results["scenarios"][0]
+        assert single["capacity_loss_pct"] == 100.0
+
+    def test_zero_origination(self):
+        from backend.bots.funding_stress_bot import FundingStressBot
+        from backend.bots.base_bot import BotInput
+        bot = FundingStressBot()
+        inp = BotInput(current_price=70.0, scenario_params={"quarterly_origination_mm": 0})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["current_months_coverage"] == 0
+
+
+class TestMacroShockBotEdgeCases:
+    """Edge cases for macro shock bot."""
+
+    def test_projected_price_floor(self):
+        from backend.bots.macro_shock_bot import MacroShockBot
+        from backend.bots.base_bot import BotInput
+        bot = MacroShockBot()
+        inp = BotInput(current_price=10.0, scenario_params={"beta": 5.0})
+        out = asyncio.run(bot.run(inp))
+        for s in out.results["scenarios"]:
+            assert s["projected_price"] >= 0.01
+
+    def test_expected_price_weighted(self):
+        from backend.bots.macro_shock_bot import MacroShockBot
+        from backend.bots.base_bot import BotInput
+        bot = MacroShockBot()
+        inp = BotInput(current_price=70.0, scenario_params={})
+        out = asyncio.run(bot.run(inp))
+        # Expected price should be between worst and best case
+        assert out.results["worst_case_price"] <= out.results["expected_price"] <= out.results["best_case_price"]
+
+    def test_beta_clamped(self):
+        from backend.bots.macro_shock_bot import MacroShockBot
+        from backend.bots.base_bot import BotInput
+        bot = MacroShockBot()
+        inp = BotInput(current_price=70.0, scenario_params={"beta": 100})
+        out = asyncio.run(bot.run(inp))
+        # With clamped beta=5, prices should still be reasonable
+        assert out.results["worst_case_price"] >= 0.01
+
+
+class TestStrategyBotEdgeCases:
+    """Edge cases for options strategy bot."""
+
+    def test_bullish_strategies_have_pl_curve(self):
+        from backend.bots.strategy_bot import StrategyBot
+        from backend.bots.base_bot import BotInput
+        bot = StrategyBot()
+        inp = BotInput(current_price=70.0, scenario_params={"direction": "bullish"})
+        out = asyncio.run(bot.run(inp))
+        for strat in out.results["strategies"]:
+            assert "pl_curve" in strat
+            assert len(strat["pl_curve"]) == 25
+
+    def test_bearish_put_spread_positive_debit(self):
+        from backend.bots.strategy_bot import StrategyBot
+        from backend.bots.base_bot import BotInput
+        bot = StrategyBot()
+        inp = BotInput(current_price=70.0, scenario_params={"direction": "bearish", "iv": 0.7, "dte": 30})
+        out = asyncio.run(bot.run(inp))
+        spread = [s for s in out.results["strategies"] if s["type"] == "put_spread"][0]
+        assert spread["cost"] > 0
+
+    def test_neutral_direction(self):
+        from backend.bots.strategy_bot import StrategyBot
+        from backend.bots.base_bot import BotInput
+        bot = StrategyBot()
+        inp = BotInput(current_price=70.0, scenario_params={"direction": "neutral"})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["direction"] == "neutral"
+
+    def test_configurable_rfr(self):
+        from backend.bots.strategy_bot import StrategyBot
+        from backend.bots.base_bot import BotInput
+        bot = StrategyBot()
+        inp = BotInput(current_price=70.0, scenario_params={"direction": "bullish", "risk_free_rate": 0.10})
+        out = asyncio.run(bot.run(inp))
+        assert out.confidence > 0  # Just verify it runs without error
+
+
+class TestRegimeBotEdgeCases:
+    """Edge cases for market regime bot."""
+
+    def test_transition_probabilities_sum_to_one(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"vix": 18, "spy_trend": "neutral"})
+        out = asyncio.run(bot.run(inp))
+        total = sum(t["probability"] for t in out.results["transitions"])
+        assert abs(total - 1.0) < 0.01
+
+    def test_high_vix_detects_risk_off(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"vix": 45})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["detected_regime"] == "risk_off"
+
+    def test_low_vix_uptrend_detects_risk_on(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"vix": 10, "spy_trend": "up"})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["detected_regime"] == "risk_on"
+
+    def test_mid_vix_neutral_detects_chop(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"vix": 22, "spy_trend": "neutral"})
+        out = asyncio.run(bot.run(inp))
+        assert out.results["detected_regime"] == "chop"
+
+    def test_no_negative_probabilities(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"vix": 5, "credit_spread_bps": 0})
+        out = asyncio.run(bot.run(inp))
+        for t in out.results["transitions"]:
+            assert t["probability"] >= 0
+
+    def test_unknown_regime_fallback(self):
+        from backend.bots.regime_bot import RegimeBot
+        from backend.bots.base_bot import BotInput
+        bot = RegimeBot()
+        inp = BotInput(scenario_params={"current_regime": "crash", "vix": 18, "spy_trend": "down"})
+        out = asyncio.run(bot.run(inp))
+        # Should fall through to current_regime="crash", but regimes.get uses "normal" fallback
+        assert out.results is not None

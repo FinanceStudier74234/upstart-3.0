@@ -12,13 +12,13 @@ class FundingStressBot(BaseBot):
     name = "funding_stress"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
 
-        total_capacity = params.get("total_capacity_mm", 5000)
-        facility_count = params.get("facility_count", 8)
-        avg_maturity_months = params.get("avg_maturity_months", 18)
-        quarterly_origination = params.get("quarterly_origination_mm", 2000)
+        total_capacity = max(1, params.get("total_capacity_mm", 5000))
+        facility_count = max(1, min(params.get("facility_count", 8), 50))
+        avg_maturity_months = max(1, min(params.get("avg_maturity_months", 18), 120))
+        quarterly_origination = max(0, params.get("quarterly_origination_mm", 2000))
 
         scenarios = []
 
@@ -57,7 +57,7 @@ class FundingStressBot(BaseBot):
                 "months_origination_support": round(months_coverage, 1),
                 "origination_impact_pct": round(origination_impact, 1),
                 "price_impact_pct": round(price_impact, 1),
-                "projected_price": round(price * (1 + price_impact / 100), 2),
+                "projected_price": round(max(0.01, price * (1 + price_impact / 100)), 2),
                 "multiple_compression": round(loss_pct * 0.3, 1),
                 "short_thesis_impact": "strongly_strengthens",
                 "probability": prob,

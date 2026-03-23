@@ -16,13 +16,13 @@ class SqueezeBot(BaseBot):
     name = "short_squeeze_simulation"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
-        short_pct_float = params.get("short_pct_float", 15.0)
-        days_to_cover = params.get("days_to_cover", 3.0)
-        utilization = params.get("utilization", 70.0)
-        call_oi_surge = params.get("call_oi_surge_pct", 0.0)
-        trigger_pct = params.get("trigger_move_pct", 5.0)
+        short_pct_float = max(0, min(params.get("short_pct_float", 15.0), 100))
+        days_to_cover = max(0.1, min(params.get("days_to_cover", 3.0), 60))
+        utilization = max(0, min(params.get("utilization", 70.0), 100))
+        call_oi_surge = max(-50, min(params.get("call_oi_surge_pct", 0.0), 500))
+        trigger_pct = max(0.5, min(params.get("trigger_move_pct", 5.0), 50))
 
         # Simulate squeeze cascade
         n_scenarios = 5
@@ -32,13 +32,15 @@ class SqueezeBot(BaseBot):
             ("mild", 10), ("moderate", 25), ("strong", 50), ("extreme", 75), ("max", 95)
         ]:
             shares_covered = short_pct_float * cover_pct / 100
-            # Price impact: each 1% of float covered adds ~0.5-2% to price (vol dependent)
-            base_impact = shares_covered * 0.8  # 0.8% per 1% of float covered
-            # Gamma amplifier
+            # Price impact: nonlinear — accelerates with coverage volume
+            # Higher days-to-cover means covering takes longer → more price pressure
+            dtc_mult = 1 + max(0, (days_to_cover - 2)) / 5 * 0.3
+            base_impact = shares_covered * 0.8 * dtc_mult  # scaled by illiquidity
+            # Gamma amplifier (dealer delta hedging on call OI surge)
             gamma_mult = 1 + call_oi_surge / 100 * 0.5
-            # Utilization amplifier (high utilization = more forced covering)
+            # Utilization amplifier (high utilization = forced covering/buy-ins)
             util_mult = 1 + max(0, (utilization - 70)) / 30 * 0.5
-            # Reflexivity: covering begets more covering
+            # Reflexivity: covering begets more covering (nonlinear cascade)
             reflexivity = 1 + (cover_pct / 100) ** 1.5
 
             total_impact = base_impact * gamma_mult * util_mult * reflexivity

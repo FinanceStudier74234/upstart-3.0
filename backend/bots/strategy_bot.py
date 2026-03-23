@@ -17,11 +17,12 @@ class StrategyBot(BaseBot):
     name = "options_strategy"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         params = input.scenario_params
-        iv = params.get("iv", 0.70)
-        dte = params.get("dte", 30)
+        iv = max(0.01, min(params.get("iv", 0.70), 5.0))
+        dte = max(1, min(params.get("dte", 30), 730))
         direction = params.get("direction", "bearish")  # bullish | bearish | neutral
+        self._rfr = params.get("risk_free_rate", 0.05)
 
         strategies = []
 
@@ -132,13 +133,14 @@ class StrategyBot(BaseBot):
         return [{"name": "No trade", "type": "cash", "max_risk": "$0", "expected_value": 0}]
 
     def _bs_price(self, s, k, vol, t, opt_type):
-        if t <= 0 or vol <= 0:
+        if t <= 0 or vol <= 0 or s <= 0 or k <= 0:
             return max(0, s - k) if opt_type == "call" else max(0, k - s)
-        d1 = (math.log(s / k) + (0.05 + vol**2 / 2) * t) / (vol * math.sqrt(t))
+        rfr = getattr(self, "_rfr", 0.05)
+        d1 = (math.log(s / k) + (rfr + vol**2 / 2) * t) / (vol * math.sqrt(t))
         d2 = d1 - vol * math.sqrt(t)
         if opt_type == "call":
-            return max(0.01, s * norm.cdf(d1) - k * math.exp(-0.05 * t) * norm.cdf(d2))
-        return max(0.01, k * math.exp(-0.05 * t) * norm.cdf(-d2) - s * norm.cdf(-d1))
+            return max(0.01, s * norm.cdf(d1) - k * math.exp(-rfr * t) * norm.cdf(d2))
+        return max(0.01, k * math.exp(-rfr * t) * norm.cdf(-d2) - s * norm.cdf(-d1))
 
     def _compute_pl_curve(self, strat, price_range, current_price):
         result = []
