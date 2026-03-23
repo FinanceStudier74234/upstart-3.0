@@ -22,7 +22,7 @@ class StrategyBot(BaseBot):
         iv = max(0.01, min(params.get("iv", 0.70), 5.0))
         dte = max(1, min(params.get("dte", 30), 730))
         direction = params.get("direction", "bearish")  # bullish | bearish | neutral
-        self._rfr = params.get("risk_free_rate", 0.05)
+        self._rfr = max(-0.05, min(params.get("risk_free_rate", 0.05), 0.30))
 
         strategies = []
 
@@ -64,6 +64,9 @@ class StrategyBot(BaseBot):
         call_strike = round(price * 1.05 / 2.5) * 2.5
         spread_long = round(price * 0.95 / 2.5) * 2.5
         spread_short = round(price * 1.05 / 2.5) * 2.5
+        # Guard: ensure strikes differ by at least one tick
+        if spread_short <= spread_long:
+            spread_short = spread_long + 2.5
 
         call_price = self._bs_price(price, call_strike, iv, t, "call")
         spread_debit = self._bs_price(price, spread_long, iv, t, "call") - self._bs_price(price, spread_short, iv, t, "call")
@@ -95,8 +98,11 @@ class StrategyBot(BaseBot):
     def _bearish_strategies(self, price, iv, dte):
         t = dte / 365
         put_strike = round(price * 0.95 / 2.5) * 2.5
-        spread_long = round(price * 0.95 / 2.5) * 2.5   # Buy lower-strike put (OTM)
-        spread_short = round(price * 0.85 / 2.5) * 2.5  # Sell further OTM put
+        spread_long = round(price * 0.95 / 2.5) * 2.5   # Buy higher-strike put (more valuable)
+        spread_short = round(price * 0.85 / 2.5) * 2.5  # Sell lower-strike put
+        # Guard: ensure long strike > short strike for bear put spread
+        if spread_long <= spread_short:
+            spread_long = spread_short + 2.5
 
         put_price = self._bs_price(price, put_strike, iv, t, "put")
         spread_debit = self._bs_price(price, spread_long, iv, t, "put") - self._bs_price(price, spread_short, iv, t, "put")

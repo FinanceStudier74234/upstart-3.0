@@ -9,9 +9,10 @@ export default function ReportsPanel({ analysis }) {
   const dg = analysis?.data_governance || {}
 
   const [exportError, setExportError] = useState(null)
+  const [alertsError, setAlertsError] = useState(null)
 
   useEffect(() => {
-    api.alerts().then(r => setAlerts(r.alerts || [])).catch(() => {})
+    api.alerts().then(r => setAlerts(r.alerts || [])).catch(e => setAlertsError(e.message))
   }, [])
 
   const downloadBlob = async (fetchFn, filename) => {
@@ -58,7 +59,7 @@ export default function ReportsPanel({ analysis }) {
               </div>
             ))}
           </div>
-        ) : <div className="text-xs text-terminal-muted">No alerts</div>}
+        ) : <div className="text-xs text-terminal-muted">{alertsError ? `Failed to load alerts: ${alertsError}` : 'No alerts'}</div>}
       </Panel>
 
       <Panel title="Data Quality Dashboard">

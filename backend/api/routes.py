@@ -397,14 +397,23 @@ async def run_backtest(req: BacktestRequest):
 
 
 # ── Simulation Bots ──
+_VALID_BOT_NAMES = {
+    "price_action", "options_reaction", "squeeze", "funding_stress",
+    "macro_shock", "strategy", "trade_decision", "regime",
+}
+
+
 class BotRequest(BaseModel):
-    bot_name: str
+    bot_name: str = Field(..., pattern=r"^[a-z_]+$")
     params: dict = Field(default_factory=dict)
 
 
 @router.post("/bot")
 async def run_bot(req: BotRequest):
     """Run a simulation bot with custom parameters."""
+    if req.bot_name not in _VALID_BOT_NAMES:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=f"Unknown bot: {req.bot_name}. Valid: {sorted(_VALID_BOT_NAMES)}")
     return await orchestrator.run_bot(req.bot_name, req.params)
 
 

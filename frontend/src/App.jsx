@@ -1,5 +1,34 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, Component } from 'react'
 import useStore from './stores/useStore'
+
+// Error boundary to prevent full-app crashes from component errors
+class ErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+  componentDidCatch(error, info) {
+    console.error('Panel error:', error, info.componentStack)
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-8 text-center">
+          <div className="text-terminal-red text-sm font-bold mb-2">Component Error</div>
+          <div className="text-terminal-muted text-xs mb-4">{this.state.error?.message || 'Unknown error'}</div>
+          <button onClick={() => this.setState({ hasError: false, error: null })}
+            className="text-xs px-3 py-1 bg-terminal-border text-terminal-text rounded hover:bg-terminal-cyan/20">
+            Retry
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
+  }
+}
 import ExecutiveDashboard from './components/dashboard/ExecutiveDashboard'
 import PriceActionPanel from './components/price/PriceActionPanel'
 import OptionsPanel from './components/options/OptionsPanel'
@@ -89,27 +118,29 @@ export default function App() {
 
       {/* Content */}
       <main className="p-4 max-w-[1800px] mx-auto">
-        {activeTab === 'dashboard' && <ExecutiveDashboard analysis={analysis} />}
-        {activeTab === 'price' && <PriceActionPanel analysis={analysis} />}
-        {activeTab === 'options' && <OptionsPanel analysis={analysis} />}
-        {activeTab === 'short' && <ShortPanel analysis={analysis} />}
-        {activeTab === 'funding' && <FundingPanel analysis={analysis} />}
-        {activeTab === 'origination' && <OriginationPanel analysis={analysis} />}
-        {activeTab === 'macro' && <MacroPanel analysis={analysis} />}
-        {activeTab === 'valuation' && <ValuationPanel analysis={analysis} />}
-        {activeTab === 'trade' && <TradeDecisionPanel analysis={analysis} />}
-        {activeTab === 'forecast' && <ForecastPanel analysis={analysis} />}
-        {activeTab === 'scenario' && <ScenarioLab />}
-        {activeTab === 'quant' && <QuantPanel analysis={analysis} />}
-        {activeTab === 'catalyst' && <CatalystPanel analysis={analysis} />}
-        {activeTab === 'backtest' && <BacktestPanel />}
-        {activeTab === 'risk' && <RiskPanel analysis={analysis} />}
-        {activeTab === 'behavioral' && <BehavioralPanel analysis={analysis} />}
-        {activeTab === 'news' && <NewsPanel analysis={analysis} />}
-        {activeTab === 'execution' && <ExecutionPanel analysis={analysis} />}
-        {activeTab === 'learning' && <LearningPanel analysis={analysis} />}
-        {activeTab === 'reports' && <ReportsPanel analysis={analysis} />}
-        {activeTab === 'bots' && <BotLab />}
+        <ErrorBoundary key={activeTab}>
+          {activeTab === 'dashboard' && <ExecutiveDashboard analysis={analysis} />}
+          {activeTab === 'price' && <PriceActionPanel analysis={analysis} />}
+          {activeTab === 'options' && <OptionsPanel analysis={analysis} />}
+          {activeTab === 'short' && <ShortPanel analysis={analysis} />}
+          {activeTab === 'funding' && <FundingPanel analysis={analysis} />}
+          {activeTab === 'origination' && <OriginationPanel analysis={analysis} />}
+          {activeTab === 'macro' && <MacroPanel analysis={analysis} />}
+          {activeTab === 'valuation' && <ValuationPanel analysis={analysis} />}
+          {activeTab === 'trade' && <TradeDecisionPanel analysis={analysis} />}
+          {activeTab === 'forecast' && <ForecastPanel analysis={analysis} />}
+          {activeTab === 'scenario' && <ScenarioLab />}
+          {activeTab === 'quant' && <QuantPanel analysis={analysis} />}
+          {activeTab === 'catalyst' && <CatalystPanel analysis={analysis} />}
+          {activeTab === 'backtest' && <BacktestPanel />}
+          {activeTab === 'risk' && <RiskPanel analysis={analysis} />}
+          {activeTab === 'behavioral' && <BehavioralPanel analysis={analysis} />}
+          {activeTab === 'news' && <NewsPanel analysis={analysis} />}
+          {activeTab === 'execution' && <ExecutionPanel analysis={analysis} />}
+          {activeTab === 'learning' && <LearningPanel analysis={analysis} />}
+          {activeTab === 'reports' && <ReportsPanel analysis={analysis} />}
+          {activeTab === 'bots' && <BotLab />}
+        </ErrorBoundary>
       </main>
 
       {/* Footer */}

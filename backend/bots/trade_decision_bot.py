@@ -30,7 +30,7 @@ class TradeDecisionBot(BaseBot):
     name = "trade_decision"
 
     async def run(self, input: BotInput) -> BotOutput:
-        price = input.current_price or 70.0
+        price = max(0.01, input.current_price or 70.0)
         data = input.market_data
 
         scores = data.get("scores", {})

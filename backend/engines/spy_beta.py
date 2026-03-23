@@ -236,7 +236,7 @@ class SPYBetaEngine:
         expected_upst_return = beta * spy_return_pct
         # Add nonlinearity for large moves (convexity)
         if abs(spy_return_pct) > 3:
-            convexity_factor = 1 + 0.1 * (abs(spy_return_pct) - 3)
+            convexity_factor = 1 + 0.1 * min(abs(spy_return_pct) - 3, 27)  # Cap at 3.7x
             expected_upst_return *= convexity_factor
 
         return {

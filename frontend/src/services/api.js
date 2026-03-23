@@ -1,24 +1,45 @@
 const BASE = '/api/v1'
 
 async function fetchJson(url) {
-  const res = await fetch(BASE + url)
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  let res
+  try {
+    res = await fetch(BASE + url)
+  } catch (e) {
+    throw new Error(`Network error: ${e.message}`)
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.detail || body.error || `API error: ${res.status}`)
+  }
   return res.json()
 }
 
 async function postJson(url, body) {
-  const res = await fetch(BASE + url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  let res
+  try {
+    res = await fetch(BASE + url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (e) {
+    throw new Error(`Network error: ${e.message}`)
+  }
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.detail || data.error || `API error: ${res.status}`)
+  }
   return res.json()
 }
 
 async function fetchBlob(url) {
-  const res = await fetch(BASE + url)
-  if (!res.ok) throw new Error(`API error: ${res.status}`)
+  let res
+  try {
+    res = await fetch(BASE + url)
+  } catch (e) {
+    throw new Error(`Network error: ${e.message}`)
+  }
+  if (!res.ok) throw new Error(`Export error: ${res.status}`)
   return res.blob()
 }
 

@@ -22,7 +22,7 @@ class OptionsReactionBot(BaseBot):
         iv_change_pct = max(-95, min(params.get("iv_change_pct", 0.0), 500))
         days_elapsed = max(0, min(params.get("days_elapsed", 7), 365))
         base_iv = max(0.01, params.get("base_iv", 0.70))
-        self._rfr = params.get("risk_free_rate", 0.05)  # configurable risk-free rate
+        self._rfr = max(-0.05, min(params.get("risk_free_rate", 0.05), 0.30))  # configurable risk-free rate
 
         new_price = max(0.01, price * (1 + price_change_pct / 100))
         new_iv = max(0.01, base_iv * (1 + iv_change_pct / 100))
