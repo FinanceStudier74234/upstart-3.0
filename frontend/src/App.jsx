@@ -101,6 +101,9 @@ export default function App() {
           </span>
           {loading && <span className="text-terminal-amber text-[10px] animate-pulse">UPDATING...</span>}
           {error && <span className="text-terminal-red text-[10px]">ERR: {error}</span>}
+          {analysis?.data_sources && Object.values(analysis.data_sources).some(s => s === 'mock') && (
+            <span className="text-terminal-amber text-[10px]">MOCK DATA</span>
+          )}
         </div>
       </header>
 

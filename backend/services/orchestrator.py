@@ -283,6 +283,11 @@ class Orchestrator:
         if macro_env is not None:
             warnings.extend(macro_env.warnings)
 
+        # Flag if running on mock data
+        mock_sources = [k for k, v in analysis.data_sources.items() if v == "mock"]
+        if mock_sources:
+            warnings.append(f"Running on mock data for: {', '.join(mock_sources)}. Connect API keys for real data.")
+
         # Parse price
         if upst_quote.data:
             analysis.price = upst_quote.data.get("price", 0) or 0
@@ -657,6 +662,14 @@ class Orchestrator:
                 analysis.probability = self._snapshot_to_dict(prob_snap)
 
         analysis.warnings = warnings
+
+        # Persist to database (non-blocking)
+        try:
+            from backend.services.database import save_analysis
+            await save_analysis(analysis.to_dict())
+        except Exception as e:
+            logger.debug("Analysis persistence skipped: %s", e)
+
         return analysis
 
     async def run_bot(self, bot_name: str, params: dict) -> dict:

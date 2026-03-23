@@ -165,9 +165,24 @@ class DataProvider:
                 )
                 continue
         return DataEnvelope(
-            data=None, source="none", quality_score=0.0,
-            warnings=["All adapters failed"],
+            data=None, source="none", source_label="unavailable", quality_score=0.0,
+            warnings=["All data adapters failed — results may be unreliable"],
         )
+
+
+    def get_data_quality_summary(self) -> dict:
+        """Return summary of which data sources are active vs mock."""
+        return {
+            "market": self._market_adapters[0].__class__.__name__ if self._market_adapters else "none",
+            "macro": self._macro_adapters[0].__class__.__name__ if self._macro_adapters else "none",
+            "short": self._short_adapters[0].__class__.__name__ if self._short_adapters else "none",
+            "news": self._news_adapters[0].__class__.__name__ if self._news_adapters else "none",
+            "fundamentals": self._fundamental_adapters[0].__class__.__name__ if self._fundamental_adapters else "none",
+            "mock_mode": self._mock_mode,
+            "has_polygon": bool(PolygonMarketAdapter is not None and any(isinstance(a, PolygonMarketAdapter) for a in self._market_adapters)) if PolygonMarketAdapter else False,
+            "has_yahoo": bool(YahooMarketAdapter is not None and any(isinstance(a, YahooMarketAdapter) for a in self._market_adapters)) if YahooMarketAdapter else False,
+            "has_fred": bool(FREDAdapter is not None and any(isinstance(a, FREDAdapter) for a in self._macro_adapters)) if FREDAdapter else False,
+        }
 
 
 # Singleton

@@ -27,6 +27,7 @@ from backend.models.signals import Signal, TradeDecision
 from backend.models.alerts import Alert
 from backend.models.audit import AuditLog, DataQualityLog
 from backend.models.backtest import BacktestRun, BacktestTrade
+from backend.models.analysis import AnalysisRecord, AlertRecord, BacktestRecord
 
 __all__ = [
     "Base",
@@ -43,4 +44,5 @@ __all__ = [
     "Alert",
     "AuditLog", "DataQualityLog",
     "BacktestRun", "BacktestTrade",
+    "AnalysisRecord", "AlertRecord", "BacktestRecord",
 ]

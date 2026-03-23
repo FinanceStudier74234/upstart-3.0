@@ -8,8 +8,19 @@ import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
 
 export default function ShortPanel({ analysis }) {
-  if (!analysis) return <div className="text-terminal-muted p-4">Loading...</div>
-  const s = analysis.short || {}
+  if (!analysis) return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="panel p-3 animate-pulse">
+            <div className="h-3 bg-terminal-border/30 rounded w-20 mb-2" />
+            <div className="h-6 bg-terminal-border/30 rounded w-16" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+  const s = analysis?.short || {}
 
   return (
     <div className="space-y-4">

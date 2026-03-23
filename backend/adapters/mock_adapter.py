@@ -51,7 +51,7 @@ class MockMarketAdapter(BaseMarketAdapter):
                 "market_cap": round(price * 85e6, 0) if ticker == "UPST" else None,
                 "volume": _rng.randint(2_000_000, 8_000_000),
             },
-            source="mock", source_label="mock", confidence=0.5,
+            source="mock", source_label="mock", confidence=0.3,
             warnings=["Mock data — not real market data"],
         )
 
@@ -82,7 +82,7 @@ class MockMarketAdapter(BaseMarketAdapter):
                 })
             cur += dt.timedelta(days=1)
         return DataEnvelope(
-            data=records, source="mock", source_label="mock", confidence=0.5,
+            data=records, source="mock", source_label="mock", confidence=0.3,
             warnings=["Mock GBM-generated price data"],
         )
 
@@ -113,7 +113,7 @@ class MockMarketAdapter(BaseMarketAdapter):
                 "vwap": round((h + l + c) / 3, 2),
             })
         return DataEnvelope(
-            data=records, source="mock", source_label="mock", confidence=0.5,
+            data=records, source="mock", source_label="mock", confidence=0.3,
             warnings=["Mock GBM-generated 1-minute intraday data"],
         )
 
@@ -145,7 +145,7 @@ class MockMarketAdapter(BaseMarketAdapter):
         return DataEnvelope(
             data={"ticker": ticker, "underlying_price": price,
                   "expirations": [], "contracts": contracts},
-            source="mock", source_label="mock", confidence=0.5,
+            source="mock", source_label="mock", confidence=0.3,
         )
 
 
@@ -173,7 +173,7 @@ class MockMacroAdapter(BaseMacroAdapter):
                 "value": round(base + jitter, 4),
             })
         return DataEnvelope(
-            data=records, source="mock", source_label="mock", confidence=0.5,
+            data=records, source="mock", source_label="mock", confidence=0.3,
             warnings=["Mock macro data"],
         )
 
@@ -194,7 +194,7 @@ class MockShortAdapter(BaseShortAdapter):
                 "days_to_cover": round(_rng.uniform(1.5, 6.0), 2),
                 "avg_volume_30d": _rng.randint(3_000_000, 8_000_000),
             },
-            source="mock", source_label="mock", confidence=0.5,
+            source="mock", source_label="mock", confidence=0.3,
         )
 
     async def get_stock_loan(self, ticker: str) -> DataEnvelope:
@@ -208,7 +208,7 @@ class MockShortAdapter(BaseShortAdapter):
                 "lendable_shares": _rng.randint(5_000_000, 20_000_000),
                 "borrow_fee_trend": _rng.choice(["rising", "stable", "falling"]),
             },
-            source="mock", source_label="mock", confidence=0.5,
+            source="mock", source_label="mock", confidence=0.3,
         )
 
 
@@ -241,7 +241,7 @@ class MockNewsAdapter(BaseNewsAdapter):
                 "sentiment_score": round(_rng.uniform(-0.8, 0.8), 3),
                 "relevance_score": round(_rng.uniform(0.3, 1.0), 3),
             })
-        return DataEnvelope(data=items, source="mock", source_label="mock", confidence=0.5)
+        return DataEnvelope(data=items, source="mock", source_label="mock", confidence=0.3)
 
 
 class MockFundamentalAdapter(BaseFundamentalAdapter):
@@ -267,7 +267,7 @@ class MockFundamentalAdapter(BaseFundamentalAdapter):
                 "total_debt": round(_rng.uniform(500e6, 1500e6)),
                 "shares_outstanding": 85_000_000,
             })
-        return DataEnvelope(data=quarters, source="mock", source_label="mock", confidence=0.5)
+        return DataEnvelope(data=quarters, source="mock", source_label="mock", confidence=0.3)
 
     async def get_earnings(self, ticker: str) -> DataEnvelope:
         releases = []
@@ -283,4 +283,4 @@ class MockFundamentalAdapter(BaseFundamentalAdapter):
                 "revenue_actual": round(_rng.uniform(130e6, 200e6)),
                 "implied_move": implied, "realized_move": realized,
             })
-        return DataEnvelope(data=releases, source="mock", source_label="mock", confidence=0.5)
+        return DataEnvelope(data=releases, source="mock", source_label="mock", confidence=0.3)

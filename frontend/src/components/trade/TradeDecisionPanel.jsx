@@ -8,7 +8,22 @@ import Stat from '../common/Stat'
 import ScoreBar from '../common/ScoreBar'
 
 export default function TradeDecisionPanel({ analysis }) {
-  if (!analysis) return <div className="text-terminal-muted p-4">Loading...</div>
+  if (!analysis) return (
+    <div className="space-y-4">
+      <div className="panel p-6 animate-pulse text-center">
+        <div className="h-10 bg-terminal-border/30 rounded w-32 mx-auto mb-3" />
+        <div className="h-4 bg-terminal-border/30 rounded w-24 mx-auto" />
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        {[...Array(6)].map((_, i) => (
+          <div key={i} className="panel p-3 animate-pulse">
+            <div className="h-3 bg-terminal-border/30 rounded w-16 mb-2" />
+            <div className="h-6 bg-terminal-border/30 rounded w-12" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
   const d = analysis.trade_decision || {}
   const prob = analysis.probability || {}
 

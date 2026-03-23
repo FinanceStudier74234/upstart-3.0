@@ -478,6 +478,13 @@ async def data_quality():
     return analysis.data_governance
 
 
+@router.get("/data-sources")
+async def data_sources():
+    """Show which data adapters are active."""
+    from backend.adapters.provider import data_provider
+    return data_provider.get_data_quality_summary()
+
+
 # ── Export ──
 @router.get("/export/csv")
 async def export_csv():

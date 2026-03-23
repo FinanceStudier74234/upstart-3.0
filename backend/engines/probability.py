@@ -114,10 +114,32 @@ class ProbabilityEngine:
 
         # Event probabilities
         si = (short_data or {}).get("short_pct_float", 0)
-        snap.prob_squeeze = round(min(0.8, si / 100 * 2), 2) if si else 0.05
+        # Squeeze probability — multi-factor: SI level + borrow cost + utilization
+        if si and si > 5:
+            si_factor = min(0.4, (si - 5) / 50)  # SI contributes up to 40%
+            ctb = (short_data or {}).get("cost_to_borrow", 5)
+            ctb_factor = min(0.2, max(0, ctb - 5) / 50)  # High borrow cost adds up to 20%
+            util = (short_data or {}).get("utilization", 50)
+            util_factor = min(0.15, max(0, util - 70) / 200)  # High utilization adds up to 15%
+            dtc = (short_data or {}).get("days_to_cover", 2)
+            dtc_factor = min(0.1, max(0, dtc - 2) / 20)  # High days-to-cover adds up to 10%
+            snap.prob_squeeze = round(max(0.02, min(0.80, si_factor + ctb_factor + util_factor + dtc_factor)), 4)
+        else:
+            snap.prob_squeeze = 0.02
 
-        snap.prob_earnings_beat = 0.55  # base rate for UPST
-        snap.prob_funding_event = 0.10
+        # Earnings beat probability — derived from recent volatility and trend
+        # Higher momentum + lower vol → higher beat probability
+        recent_mom = float(np.sum(returns[-21:])) if len(returns) >= 21 else 0
+        vol_adj = max(0, 1 - sigma * np.sqrt(252) / 2)  # Lower vol = higher confidence
+        snap.prob_earnings_beat = round(max(0.30, min(0.75, 0.50 + recent_mom * 2 + vol_adj * 0.1)), 4)
+
+        # Funding event probability — elevated if vol is high or trend is negative
+        base_funding_prob = 0.08
+        if sigma * np.sqrt(252) > 0.6:  # High vol environment
+            base_funding_prob += 0.05
+        if recent_mom < -0.05:  # Negative momentum
+            base_funding_prob += 0.05
+        snap.prob_funding_event = round(min(0.30, base_funding_prob), 4)
 
         snap.overall_confidence = self._confidence(returns)
 
@@ -206,14 +228,25 @@ class ProbabilityEngine:
         except Exception:
             pass
 
-        # Fallback: momentum-based heuristic
+        # Fallback: graduated momentum + volatility heuristic
         recent = returns[-21:] if len(returns) >= 21 else returns
         cum = float(np.sum(recent))
-        if cum > 0.05:
-            return (0.55, 0.30, 0.15)
-        elif cum < -0.05:
-            return (0.15, 0.30, 0.55)
-        return (0.30, 0.40, 0.30)
+        vol = float(np.std(recent)) * np.sqrt(252)
+
+        # Logistic mapping of momentum to bull/bear probability
+        import math
+        bull_raw = 1 / (1 + math.exp(-cum * 20))  # Sigmoid: maps cum to (0, 1)
+
+        # High vol → more neutral uncertainty
+        vol_uncertainty = min(0.3, max(0, (vol - 0.3) * 0.5))
+
+        bull = max(0.10, min(0.70, bull_raw * (1 - vol_uncertainty)))
+        bear = max(0.10, min(0.70, (1 - bull_raw) * (1 - vol_uncertainty)))
+        neutral = max(0.10, 1 - bull - bear)
+
+        # Normalize
+        total = bull + neutral + bear
+        return (round(bull / total, 4), round(neutral / total, 4), round(bear / total, 4))
 
     def _confidence(self, returns: np.ndarray) -> float:
         # More data = more confidence, less volatility = more confidence

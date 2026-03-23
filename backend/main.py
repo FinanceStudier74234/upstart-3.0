@@ -44,6 +44,29 @@ def create_app() -> FastAPI:
         allow_headers=["Content-Type", "Authorization"],
     )
 
+    # API key authentication (optional — enabled when APP_SECRET_KEY is set)
+    if settings.app_secret_key and settings.is_production:
+        from starlette.middleware.base import BaseHTTPMiddleware
+        from starlette.responses import JSONResponse as StarletteJSONResponse
+
+        class APIKeyMiddleware(BaseHTTPMiddleware):
+            EXEMPT_PATHS = {"/docs", "/redoc", "/openapi.json", "/api/v1/health"}
+
+            async def dispatch(self, request, call_next):
+                if request.url.path in self.EXEMPT_PATHS:
+                    return await call_next(request)
+                if request.url.path.startswith("/api/"):
+                    api_key = request.headers.get("X-API-Key") or request.query_params.get("api_key")
+                    if api_key != settings.app_secret_key:
+                        return StarletteJSONResponse(
+                            status_code=401,
+                            content={"error": "Invalid or missing API key", "detail": "Set X-API-Key header"},
+                        )
+                return await call_next(request)
+
+        app.add_middleware(APIKeyMiddleware)
+        logger.info("API key authentication enabled for production")
+
     # Global exception handler — return structured JSON instead of raw 500
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):

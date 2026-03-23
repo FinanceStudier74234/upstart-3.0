@@ -8,7 +8,21 @@ import {
 } from 'recharts'
 
 export default function ExecutiveDashboard({ analysis }) {
-  if (!analysis) return <div className="text-terminal-muted p-8">Loading analysis...</div>
+  const isMockData = analysis?.data_sources && Object.values(analysis.data_sources).some(s => s === 'mock')
+  const hasWarnings = analysis?.warnings?.length > 0
+
+  if (!analysis) return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[...Array(8)].map((_, i) => (
+          <div key={i} className="panel p-3 animate-pulse">
+            <div className="h-3 bg-terminal-border/30 rounded w-20 mb-2" />
+            <div className="h-6 bg-terminal-border/30 rounded w-16" />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 
   const { price, scores, trade_decision, forecast, spy_relationship, short, options, risk, technical } = analysis
 
@@ -53,6 +67,11 @@ export default function ExecutiveDashboard({ analysis }) {
 
   return (
     <div className="space-y-4">
+      {isMockData && (
+        <div className="mb-3 px-3 py-2 bg-terminal-amber/10 border border-terminal-amber/30 rounded text-xs text-terminal-amber">
+          Running on simulated data. Connect API keys for live market data.
+        </div>
+      )}
       {/* Header Row */}
       <div className="flex items-center gap-4 px-1">
         <h1 className="text-2xl font-black text-terminal-cyan">UPST</h1>
