@@ -7,6 +7,24 @@ from __future__ import annotations
 
 from backend.bots.base_bot import BaseBot, BotInput, BotOutput
 
+# Map every possible action to its recommended vehicle
+_VEHICLE_MAP = {
+    "buy": "common_stock",
+    "add": "common_stock",
+    "hold": "common_stock",
+    "trim": "common_stock",
+    "sell": "common_stock",
+    "short": "short_stock",
+    "add_short": "short_stock",
+    "cover": "common_stock",
+    "buy_calls": "calls",
+    "buy_puts": "puts",
+    "bull_spread": "spreads",
+    "bear_spread": "spreads",
+    "vol_trade": "spreads",
+    "no_trade": "none",
+}
+
 
 class TradeDecisionBot(BaseBot):
     name = "trade_decision"
@@ -104,10 +122,10 @@ class TradeDecisionBot(BaseBot):
                 "bearish_conviction": round(bearish_str, 2),
                 "signal_conflict": abs(bullish_str - bearish_str) < 0.5,
                 "vehicle_comparison": vehicles,
-                "recommended_vehicle": "puts" if action == "buy_puts" else ("common_stock" if action == "buy" else "none"),
+                "recommended_vehicle": _VEHICLE_MAP.get(action, "none"),
             },
             explanation=explanation,
-            confidence=0.6 if quality == "good" else 0.4 if quality == "moderate" else 0.2,
+            confidence=self._compute_confidence(quality, bullish_str, bearish_str, caution_str),
             assumptions={
                 "score_thresholds": {"bullish": 60, "bearish": 40, "strong": 65, "weak": 35},
                 "conviction_multiplier": 1.3,
@@ -117,11 +135,19 @@ class TradeDecisionBot(BaseBot):
             limitations=[
                 "Signal weights are heuristic, not calibrated to historical accuracy",
                 "Vehicle comparison is qualitative, not quantitative P/L analysis",
-                "Decision thresholds are fixed, not regime-adaptive",
-                "No position sizing recommendation embedded in output",
-                "Confidence levels are discrete (0.2/0.4/0.6), not continuous",
             ],
         )
+
+    @staticmethod
+    def _compute_confidence(quality: str, bull_str: float, bear_str: float, caution_str: float) -> float:
+        """Continuous confidence from signal strength and quality."""
+        base = {"good": 0.55, "moderate": 0.35, "poor": 0.15}.get(quality, 0.15)
+        # Stronger directional conviction → higher confidence
+        dominant = max(bull_str, bear_str)
+        conviction_bonus = min(0.25, dominant / 10)  # up to +0.25
+        # Caution penalizes confidence
+        caution_penalty = min(0.20, caution_str / 5)
+        return round(max(0.05, min(0.95, base + conviction_bonus - caution_penalty)), 3)
 
     def _get_val(self, scores, name, default=50):
         s = scores.get(name)

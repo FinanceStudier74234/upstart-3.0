@@ -130,23 +130,21 @@ class ScenarioEngine:
         out.adjusted_downside_pct = round(abs(min(0, worst_case_impact * 100)), 2)
         out.spy_adjusted_expected_move = round(spy_impact, 2)
 
-        # ── Probabilities (heuristic, must stay in [0, 1] and sum <= 1) ──
+        # ── Probabilities (logistic mapping, always sums to 1.0) ──
         flat_prob = 0.10  # reserved for flat/unchanged outcome
-        if total_impact > 0.02:
-            out.probability_up = round(min(0.85, 0.5 + total_impact), 4)
-            out.probability_down = round(max(0.05, 1 - out.probability_up - flat_prob), 4)
-        elif total_impact < -0.02:
-            out.probability_down = round(min(0.85, 0.5 - total_impact), 4)
-            out.probability_up = round(max(0.05, 1 - out.probability_down - flat_prob), 4)
-        else:
-            out.probability_up = 0.35
-            out.probability_down = 0.35
+        # Use logistic function to map impact → [0, 1] with natural bounds
+        import math as _math
+        logistic_up = 1.0 / (1.0 + _math.exp(-total_impact * 8))  # steepness=8
+        # Scale to leave room for flat probability
+        available = 1.0 - flat_prob
+        out.probability_up = round(max(0.05, min(0.85, logistic_up * available)), 4)
+        out.probability_down = round(max(0.05, min(0.85, available - out.probability_up)), 4)
 
         # ── Adjust Scores ──
         out.adjusted_scores = self._adjust_scores(base_scores, inputs)
 
-        # ── Adjusted IV ──
-        adjusted_iv = base_iv * (1 + inputs.iv_change_pct / 100)
+        # ── Adjusted IV (floor at 1% — IV can't be negative) ──
+        adjusted_iv = max(0.01, base_iv * (1 + inputs.iv_change_pct / 100))
 
         # ── Risk Metrics ──
         out.adjusted_risk_metrics = {
@@ -162,18 +160,22 @@ class ScenarioEngine:
         out.confidence = round(max(10, 80 - shock_magnitude * 200), 2)
         out.fragility = round(min(95, 20 + shock_magnitude * 300), 2)
 
-        # ── Trade Recommendation ──
-        if total_impact > 0.05 and out.confidence > 40:
+        # ── Trade Recommendation (EV-weighted, not just direction) ──
+        expected_value = (out.probability_up * out.adjusted_upside_pct -
+                          out.probability_down * out.adjusted_downside_pct)
+        if expected_value > 2.0 and out.confidence > 30:
             out.adjusted_trade_recommendation = "buy"
             out.adjusted_vehicle = "common_stock"
-        elif total_impact < -0.05 and out.confidence > 40:
+        elif expected_value < -2.0 and out.confidence > 30:
             out.adjusted_trade_recommendation = "short" if inputs.squeeze_risk_change_pct < 20 else "buy_puts"
             out.adjusted_vehicle = "short_stock" if inputs.squeeze_risk_change_pct < 20 else "put_option"
         else:
             out.adjusted_trade_recommendation = "no_trade"
             out.adjusted_vehicle = "no_vehicle"
 
-        out.adjusted_position_size_pct = round(max(1, 5 * out.confidence / 80), 2)
+        # Scale position with confidence AND risk-reward, not just confidence
+        ev_scale = min(2.0, max(0.5, abs(expected_value) / 5)) if expected_value != 0 else 0.5
+        out.adjusted_position_size_pct = round(max(1, 5 * out.confidence / 80 * ev_scale), 2)
 
         out.explanation = (
             f"Scenario impact: {total_impact*100:+.2f}% "

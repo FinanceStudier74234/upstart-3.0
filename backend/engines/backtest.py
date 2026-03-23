@@ -203,14 +203,18 @@ class BacktestEngine:
 
         result.total_return = round((equity[-1] / initial_capital - 1) * 100, 2)
         days = (result.end_date - result.start_date).days if result.start_date and result.end_date else 365
-        result.annualized_return = round(((1 + result.total_return / 100) ** (365 / max(days, 1)) - 1) * 100, 2)
+        # Guard against inflated annualized returns for very short backtests
+        if days >= 20:
+            result.annualized_return = round(((1 + result.total_return / 100) ** (365 / days) - 1) * 100, 2)
+        else:
+            result.annualized_return = result.total_return  # Too short to annualize meaningfully
 
         result.win_rate = round(len(wins) / len(trades) * 100, 2) if trades else 0
         result.avg_win = round(np.mean(wins), 2) if wins else 0
         result.avg_loss = round(np.mean(losses), 2) if losses else 0
-        result.payoff_ratio = round(abs(result.avg_win / result.avg_loss), 2) if result.avg_loss != 0 else 0
+        result.payoff_ratio = round(abs(result.avg_win / result.avg_loss), 2) if result.avg_loss != 0 else 999.99
         result.expectancy = round(np.mean(pnls), 2) if pnls else 0
-        result.profit_factor = round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 0
+        result.profit_factor = round(sum(wins) / abs(sum(losses)), 2) if losses and sum(losses) != 0 else 999.99
 
         # Sharpe / Sortino
         equity_returns = pd.Series(equity).pct_change().dropna()

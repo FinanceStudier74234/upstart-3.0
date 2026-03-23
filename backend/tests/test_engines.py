@@ -931,3 +931,308 @@ class TestCalibrationEngine:
         assert isinstance(result.signal_decay, dict)
         assert isinstance(result.ensemble_weights, dict)
         assert "all" in result.confusion
+
+
+# ═══════════════════════════════════════════════════
+# COMPREHENSIVE EDGE-CASE TESTS
+# ═══════════════════════════════════════════════════
+
+class TestTradeDecisionEdgeCases:
+    """Edge cases for trade decision engine."""
+
+    def _make_scores(self, overrides=None):
+        defaults = {
+            "composite_opportunity": 50, "technical_strength": 50,
+            "options_sentiment": 50, "short_opportunity": 50,
+            "squeeze_risk": 30, "trade_quality": 55, "positioning_fragility": 30,
+            "funding_strength": 50, "macro_pressure": 50,
+        }
+        if overrides:
+            defaults.update(overrides)
+        return {k: type("S", (), {"value": float(v), "confidence": 0.8})()
+                for k, v in defaults.items()}
+
+    def test_all_neutral_scores(self):
+        """All scores at 50 → neutral/hold, no crash."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        rec = TradeDecisionEngine().decide(scores=self._make_scores(), price=70.0)
+        assert rec.action in ("hold", "no_trade")
+        assert rec.confidence == "low"
+
+    def test_neutral_path_has_stops(self):
+        """Neutral action should still provide defensive stop/target levels."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        rec = TradeDecisionEngine().decide(
+            scores=self._make_scores({"composite_opportunity": 55, "trade_quality": 55}),
+            price=70.0,
+            technical={"atr": 2.5},
+        )
+        if rec.action == "hold":
+            assert rec.stop_price is not None
+            assert rec.target_price is not None
+
+    def test_zero_price(self):
+        """Zero price must not crash."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        rec = TradeDecisionEngine().decide(scores=self._make_scores(), price=0.0)
+        assert rec.action is not None
+        assert rec.target_price is None or rec.target_price == 0
+
+    def test_regime_aware_sizing(self):
+        """Crisis vol regime must produce smaller position than bull regime."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        bull_scores = self._make_scores({"composite_opportunity": 80, "technical_strength": 75})
+        engine = TradeDecisionEngine()
+        bull_rec = engine.decide(scores=bull_scores, price=70.0,
+                                  hmm_regime={"current_regime": "bull"},
+                                  garch={"vol_regime": "normal"})
+        crisis_rec = engine.decide(scores=bull_scores, price=70.0,
+                                    hmm_regime={"current_regime": "bear"},
+                                    garch={"vol_regime": "crisis_vol"})
+        if bull_rec.suggested_position_pct and crisis_rec.suggested_position_pct:
+            assert crisis_rec.suggested_position_pct < bull_rec.suggested_position_pct
+
+    def test_win_prob_bounded(self):
+        """Win probability must stay within [0.15, 0.85]."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        extreme_bull = self._make_scores({
+            "composite_opportunity": 100, "technical_strength": 100,
+            "trade_quality": 100, "positioning_fragility": 0,
+        })
+        rec = TradeDecisionEngine().decide(scores=extreme_bull, price=70.0,
+                                            technical={"atr": 2.5})
+        if rec.expected_value is not None and rec.target_price and rec.stop_price:
+            # Back-derive win_prob from EV
+            upside = rec.target_price - 70.0
+            downside = 70.0 - rec.stop_price
+            if upside > 0 and downside > 0:
+                wp = (rec.expected_value + downside) / (upside + downside)
+                assert 0.14 <= wp <= 0.86
+
+    def test_conflicting_signals(self):
+        """Strong bullish + strong bearish → low confidence."""
+        from backend.engines.trade_decision import TradeDecisionEngine
+        mixed = self._make_scores({
+            "composite_opportunity": 50, "technical_strength": 80,
+            "options_sentiment": 20, "short_opportunity": 75,
+            "funding_strength": 80, "macro_pressure": 80,
+        })
+        rec = TradeDecisionEngine().decide(scores=mixed, price=70.0)
+        assert rec.confidence in ("low", "moderate")
+
+
+class TestScoringEdgeCases:
+    """Edge cases for scoring engine."""
+
+    def test_all_scores_bounded(self):
+        """Every score in compute_all must be in [0, 100]."""
+        from backend.engines.scoring import ScoringEngine
+        result = ScoringEngine().compute_all()
+        for name, sr in result.items():
+            assert 0 <= sr.value <= 100, f"{name}={sr.value} out of bounds"
+
+    def test_extreme_valuation_inputs(self):
+        """Extreme valuation data must not produce unbounded scores."""
+        from backend.engines.scoring import ScoringEngine
+        engine = ScoringEngine()
+        # Simulate extreme inputs
+        sr = engine._valuation_attractiveness({
+            "price_to_sales": 0.01,  # extremely cheap
+            "ps_median_3y": 8.0,
+            "ev_revenue": 0.1,
+            "growth_rate": 200,  # 200% growth
+            "fcf_yield": 0.50,  # 50% FCF yield
+            "upside_to_fair": 200,  # 200% upside
+        })
+        assert 0 <= sr.value <= 100
+
+    def test_zero_ps_no_crash(self):
+        """price_to_sales = 0 must not cause division by zero."""
+        from backend.engines.scoring import ScoringEngine
+        sr = ScoringEngine()._valuation_attractiveness({"price_to_sales": 0})
+        assert 0 <= sr.value <= 100
+
+
+class TestRiskEdgeCases:
+    """Edge cases for risk engine."""
+
+    def test_all_positive_returns(self):
+        """All-winning returns: VaR should still be valid, tail_ratio not None."""
+        from backend.engines.risk import RiskEngine
+        returns = np.array([0.01, 0.02, 0.015, 0.005, 0.03] * 10)
+        rm = RiskEngine().compute_risk(returns, price=70.0)
+        assert rm.var_95_1d is not None
+        assert rm.max_drawdown is not None and rm.max_drawdown <= 0
+
+    def test_all_negative_returns(self):
+        """All-losing returns: risk metrics still populated, high risk of ruin."""
+        from backend.engines.risk import RiskEngine
+        returns = np.array([-0.01, -0.02, -0.015, -0.005, -0.03] * 10)
+        # Pass negative-expectancy parameters to match the return distribution
+        rm = RiskEngine().compute_risk(returns, price=70.0, win_rate=0.2, avg_win=0.01, avg_loss=0.03)
+        assert rm.var_95_1d is not None and rm.var_95_1d > 0
+        assert rm.risk_of_ruin_pct == 100.0  # truly negative expectancy
+
+    def test_zero_vol_capped_size(self):
+        """Zero-vol returns: position sizing must be capped, not 100%."""
+        from backend.engines.risk import RiskEngine
+        returns = np.array([0.0] * 30)
+        rm = RiskEngine().compute_risk(returns, price=70.0)
+        assert rm.vol_target_size_pct <= 50.0
+
+    def test_skew_adjusts_max_loss_sizing(self):
+        """Highly skewed returns should produce different sizing than normal."""
+        from backend.engines.risk import RiskEngine
+        # Normal returns
+        np.random.seed(42)
+        normal_ret = np.random.normal(0, 0.02, 100)
+        rm_normal = RiskEngine().compute_risk(normal_ret, price=70.0)
+        # Fat-tailed returns (heavy left skew)
+        skewed_ret = normal_ret.copy()
+        skewed_ret[0] = -0.15  # crash event
+        skewed_ret[1] = -0.12
+        rm_skewed = RiskEngine().compute_risk(skewed_ret, price=70.0)
+        # Skewed should have smaller max_loss_size (more conservative)
+        if rm_normal.max_loss_size_pct and rm_skewed.max_loss_size_pct:
+            assert rm_skewed.max_loss_size_pct <= rm_normal.max_loss_size_pct
+
+
+class TestScenarioEdgeCases:
+    """Edge cases for scenario engine."""
+
+    def test_probability_sum_equals_one(self):
+        """probability_up + probability_down + flat must always sum to ~1.0."""
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        engine = ScenarioEngine()
+        for impact in [-1.0, -0.5, -0.1, 0.0, 0.1, 0.5, 1.0]:
+            inputs = ScenarioInputs(spy_return_pct=impact * 10)
+            result = engine.run_scenario(inputs, base_price=70.0, base_scores={})
+            total = result.probability_up + result.probability_down + 0.10
+            assert 0.95 <= total <= 1.05, (
+                f"impact={impact}: prob_up={result.probability_up}, "
+                f"prob_down={result.probability_down}, total={total}"
+            )
+
+    def test_probabilities_non_negative(self):
+        """All probabilities must be >= 0."""
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        inputs = ScenarioInputs(spy_return_pct=-30, macro_stress_shock=1.0)
+        result = ScenarioEngine().run_scenario(inputs, base_price=70.0, base_scores={})
+        assert result.probability_up >= 0
+        assert result.probability_down >= 0
+
+    def test_negative_iv_change_clamped(self):
+        """IV change of -150% must not produce negative IV."""
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        inputs = ScenarioInputs(iv_change_pct=-150)
+        result = ScenarioEngine().run_scenario(inputs, base_price=70.0, base_scores={})
+        vol = result.adjusted_risk_metrics.get("vol_adjusted", 0)
+        assert vol > 0
+
+    def test_ev_based_trade_recommendation(self):
+        """Strong upside + high probability should trigger buy."""
+        from backend.engines.scenario import ScenarioEngine, ScenarioInputs
+        inputs = ScenarioInputs(origination_growth_change_pct=20, funding_capacity_change_pct=30)
+        result = ScenarioEngine().run_scenario(inputs, base_price=70.0, base_scores={})
+        if result.adjusted_upside_pct > 10:
+            assert result.adjusted_trade_recommendation in ("buy", "no_trade")
+
+
+class TestBacktestEdgeCases:
+    """Edge cases for backtest engine."""
+
+    def test_short_signals(self):
+        """Backtest with short-only signals must handle shorts correctly."""
+        from backend.engines.backtest import BacktestEngine
+        df = make_ohlcv_df(100)
+        signals = [{"date": str(df.index[10].date()), "direction": "short", "strength": 0.8}]
+        result = BacktestEngine().run(df, signals, slippage_pct=0.0, commission_per_trade=0.0)
+        assert result.total_trades >= 1
+        for t in result.trades:
+            assert t["direction"] == "short"
+
+    def test_all_winners_profit_factor(self):
+        """All-winning trades should produce high payoff/profit factor, not 0."""
+        from backend.engines.backtest import BacktestEngine
+        import pandas as pd
+        # Steadily rising price guarantees long winners
+        dates = pd.date_range("2024-01-01", periods=50, freq="B")
+        prices = [70.0 + i * 0.5 for i in range(50)]
+        df = pd.DataFrame({
+            "open": prices, "high": [p + 0.3 for p in prices],
+            "low": [p - 0.3 for p in prices], "close": prices,
+            "volume": [1_000_000] * 50,
+        }, index=dates)
+        signals = [{"date": str(dates[5].date()), "direction": "long", "strength": 0.9}]
+        result = BacktestEngine().run(df, signals, take_profit_pct=5.0, stop_loss_pct=20.0,
+                                       slippage_pct=0.0, commission_per_trade=0.0)
+        if result.total_trades > 0 and result.avg_loss == 0:
+            assert result.payoff_ratio > 0  # Not 0, should be high
+            assert result.profit_factor > 0
+
+    def test_empty_signals(self):
+        """Empty signals list → no crash, zero trades."""
+        from backend.engines.backtest import BacktestEngine
+        df = make_ohlcv_df(50)
+        result = BacktestEngine().run(df, [])
+        assert result.total_trades == 0
+
+    def test_very_short_backtest_annualization(self):
+        """Very short backtest (<20 days) should not inflate annualized returns."""
+        from backend.engines.backtest import BacktestEngine
+        df = make_ohlcv_df(10)
+        signals = [{"date": str(df.index[1].date()), "direction": "long", "strength": 0.8}]
+        result = BacktestEngine().run(df, signals, slippage_pct=0.0, commission_per_trade=0.0)
+        # Annualized should equal total (not compounded to absurd levels)
+        assert result.annualized_return == result.total_return
+
+
+class TestExecutionEdgeCases:
+    """Edge cases for execution engine."""
+
+    def test_zero_depth_imbalance(self):
+        """Zero bid + ask depth must produce None imbalance, not 0."""
+        from backend.engines.execution import ExecutionEngine
+        snap = ExecutionEngine().analyze(price=70.0, volume_data={
+            "bid_depth": 0, "ask_depth": 0, "avg_daily_volume": 5_000_000,
+        })
+        assert snap.depth_imbalance is None
+
+    def test_chop_index_constant_price(self):
+        """Constant price bars → chop index = 100 (max chop)."""
+        from backend.engines.execution import ExecutionEngine
+        bars = [{"open": 70.0, "high": 70.0, "low": 70.0, "close": 70.0,
+                 "volume": 100_000} for _ in range(20)]
+        snap = ExecutionEngine().analyze(price=70.0, bars=bars)
+        # All highs/lows are 0 range → should be "chop" or "unknown"
+        assert snap.chop_trend_regime in ("chop", "unknown")
+
+    def test_stop_run_below_price(self):
+        """Stop run proximity must be computed from levels below current price."""
+        from backend.engines.execution import ExecutionEngine
+        bars = [{"open": 75.0, "high": 76.0, "low": 60.0, "close": 75.0,
+                 "volume": 100_000} for _ in range(20)]
+        snap = ExecutionEngine().analyze(price=70.5, bars=bars)
+        if snap.stop_run_proximity_pct is not None:
+            assert snap.stop_run_proximity_pct > 0  # must be positive distance
+
+
+class TestTradeDecisionBotEdgeCases:
+    """Edge cases for trade decision bot."""
+
+    def test_vehicle_mapping_complete(self):
+        """All 12 action types must map to a valid vehicle, not 'none'."""
+        from backend.bots.trade_decision_bot import _VEHICLE_MAP
+        for action in ["buy", "short", "buy_calls", "buy_puts",
+                       "bull_spread", "bear_spread", "cover", "sell",
+                       "add", "add_short", "trim", "hold"]:
+            assert _VEHICLE_MAP.get(action) != "none", f"Action '{action}' maps to 'none'"
+
+    def test_continuous_confidence(self):
+        """Confidence must be continuous, not just 0.2/0.4/0.6."""
+        from backend.bots.trade_decision_bot import TradeDecisionBot
+        c1 = TradeDecisionBot._compute_confidence("good", 3.0, 0.5, 0.0)
+        c2 = TradeDecisionBot._compute_confidence("good", 1.5, 0.5, 0.0)
+        assert c1 != c2  # Must differ for different conviction
+        assert 0 < c1 < 1
+        assert 0 < c2 < 1

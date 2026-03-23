@@ -91,7 +91,7 @@ class RiskEngine:
         rm.kurtosis = round(float(stats.kurtosis(returns)), 4)
         p95 = np.percentile(returns, 95)
         p5 = np.percentile(returns, 5)
-        rm.tail_ratio = round(abs(p95 / p5), 4) if p5 != 0 else None
+        rm.tail_ratio = round(min(abs(p95 / p5), 100.0), 4) if abs(p5) > 1e-10 else None
 
         # ── Position Sizing ──
         daily_vol = float(np.std(returns))
@@ -113,12 +113,17 @@ class RiskEngine:
             rm.kelly_size_pct = 0
             rm.quarter_kelly_pct = 0
 
-        # 3. Max-loss sizing
+        # 3. Max-loss sizing (skew/kurtosis-adjusted)
         if daily_vol > 0:
-            # Size such that max_portfolio_loss_pct is respected
-            max_loss_per_unit = daily_vol * 2  # ~2 sigma daily
+            # Use Cornish-Fisher expansion for fat-tailed distributions
+            z = 1.645  # base 95% quantile
+            s = rm.skewness or 0
+            k = rm.kurtosis or 0  # excess kurtosis
+            # Cornish-Fisher adjustment for non-normal tails
+            cf_z = z + (z**2 - 1) * s / 6 + (z**3 - 3*z) * k / 24 - (2*z**3 - 5*z) * s**2 / 36
+            max_loss_per_unit = daily_vol * max(cf_z, 1.5)  # floor at 1.5σ
             rm.max_loss_size_pct = round(
-                max_portfolio_loss_pct / (max_loss_per_unit * 100) * 100, 2,
+                max_portfolio_loss_pct / (max_loss_per_unit * 100), 2,
             )
         else:
             rm.max_loss_size_pct = max_portfolio_loss_pct

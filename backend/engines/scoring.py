@@ -83,7 +83,7 @@ class ScoringEngine:
         components["coverage"] = min(100, data.get("months_coverage", 0) / 24 * 100)  # 24mo = 100
         components["diversification"] = min(100, data.get("partner_count", 0) / 10 * 100)
         components["maturity"] = min(100, data.get("avg_months_to_maturity", 0) / 36 * 100)
-        components["renewal"] = data.get("avg_renewal_prob", 0.5) * 100
+        components["renewal"] = min(100, max(0, data.get("avg_renewal_prob", 0.5) * 100))
         components["covenants"] = 100 if not data.get("has_covenant_issues") else 30
 
         value = sum(components[k] * weights[k] for k in weights)
@@ -111,7 +111,7 @@ class ScoringEngine:
         qoq = data.get("qoq_growth", 0)
         yoy = data.get("yoy_growth", 0)
         components["qoq"] = max(0, min(100, 50 + qoq * 100))
-        components["yoy"] = max(0, min(100, 50 + yoy * 50))
+        components["yoy"] = max(0, min(100, 50 + yoy * 100))
         components["volume"] = min(100, data.get("volume_index", 50))
         components["accel"] = 70 if data.get("accelerating") else 30
         components["diversification"] = min(100, data.get("product_count", 1) / 4 * 100)
@@ -201,9 +201,9 @@ class ScoringEngine:
         components["ps_history"] = min(100, max(0, (ps_hist_median - ps) / ps_hist_median * 100 + 50))
         components["ps_peers"] = min(100, max(0, 100 - ps * 8))
         components["ev_rev"] = min(100, max(0, 100 - data.get("ev_revenue", 6) * 8))
-        components["growth_adj"] = min(100, max(0, data.get("growth_rate", 20) / ps * 15))
-        components["fcf"] = max(0, data.get("fcf_yield", 0) * 10 + 50)
-        components["fair_value"] = max(0, data.get("upside_to_fair", 0) + 50)
+        components["growth_adj"] = min(100, max(0, data.get("growth_rate", 20) / max(ps, 0.01) * 15))
+        components["fcf"] = min(100, max(0, data.get("fcf_yield", 0) * 10 + 50))
+        components["fair_value"] = min(100, max(0, data.get("upside_to_fair", 0) + 50))
 
         value = sum(components[k] * weights[k] for k in weights)
         return ScoreResult(
@@ -349,7 +349,7 @@ class ScoringEngine:
                 total += val * weight
                 weight_sum += weight
 
-        composite = total / weight_sum * 100 / 100 if weight_sum > 0 else 50.0
+        composite = total / weight_sum if weight_sum > 0 else 50.0
         return ScoreResult(
             name="composite_opportunity",
             value=round(max(0, min(100, composite)), 2),

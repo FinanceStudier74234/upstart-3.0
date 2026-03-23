@@ -145,6 +145,10 @@ class TradeDecisionEngine:
         # ── Determine Direction ──
         factors = []
 
+        # Store regime context on rec for sizing
+        rec._regime_context = regime_context
+        rec._vol_regime = vol_regime
+
         if composite_val > 65 and bullish_signals > bearish_signals:
             # BULLISH
             rec = self._bullish_decision(rec, scores, technical, options, price)
@@ -154,10 +158,14 @@ class TradeDecisionEngine:
             rec = self._bearish_decision(rec, scores, short, options, technical, price, squeeze_val)
             factors = self._collect_bearish_factors(scores)
         else:
-            # NEUTRAL
+            # NEUTRAL — still provide defensive stops
             rec.action = "hold" if composite_val > 50 else "no_trade"
             rec.vehicle = "common_stock" if rec.action == "hold" else "no_vehicle"
             rec.explanation = "Mixed signals. Composite near neutral."
+            if price > 0:
+                atr = technical.get("atr", price * 0.04) if technical else price * 0.04
+                rec.stop_price = round(price - atr * 2, 2)
+                rec.target_price = round(price + atr * 2, 2)
             factors = [{"factor": "mixed_signals", "weight": 1.0, "detail": f"Composite={composite_val:.1f}"}]
 
         rec.dominant_factors = sorted(factors, key=lambda x: abs(x.get("weight", 0)), reverse=True)[:5]
@@ -203,7 +211,7 @@ class TradeDecisionEngine:
             if rec.stop_price < price:
                 rec.reward_risk_ratio = round((rec.target_price - price) / (price - rec.stop_price), 2)
                 if rec.reward_risk_ratio > 0:
-                    win_prob = 0.5 + (self._sv(scores, "composite_opportunity") - 50) / 200
+                    win_prob = self._estimate_win_prob(scores, rec, bullish=True)
                     rec.expected_value = round(
                         win_prob * (rec.target_price - price) - (1 - win_prob) * (price - rec.stop_price), 2,
                     )
@@ -239,7 +247,7 @@ class TradeDecisionEngine:
             if rec.stop_price > price:
                 rec.reward_risk_ratio = round((price - rec.target_price) / (rec.stop_price - price), 2)
                 if rec.reward_risk_ratio > 0:
-                    win_prob = 0.5 + (50 - self._sv(scores, "composite_opportunity")) / 200
+                    win_prob = self._estimate_win_prob(scores, rec, bullish=False)
                     rec.expected_value = round(
                         win_prob * (price - rec.target_price) - (1 - win_prob) * (rec.stop_price - price), 2,
                     )
@@ -249,14 +257,43 @@ class TradeDecisionEngine:
         return rec
 
     def _size_position(self, scores, rec) -> float:
-        """Volatility-targeted, capped quarter-Kelly sizing."""
+        """Regime-aware, volatility-targeted, capped quarter-Kelly sizing."""
         base = 5.0  # 5% base position
         # Reduce for low quality
         quality_adj = min(1.0, rec.trade_quality_score / 60)
         # Reduce for high fragility
         frag_adj = max(0.3, 1.0 - rec.fragility_score / 100)
-        size = base * quality_adj * frag_adj
+        # Regime adjustment: reduce in bear/crisis, hold steady in bull
+        regime_adj = 1.0
+        regime = getattr(rec, "_regime_context", "")
+        vol_regime = getattr(rec, "_vol_regime", "")
+        if vol_regime == "crisis_vol":
+            regime_adj = 0.4
+        elif vol_regime == "high_vol":
+            regime_adj = 0.6
+        elif regime == "bear":
+            regime_adj = 0.7
+        elif regime == "bull":
+            regime_adj = 1.1
+        size = base * quality_adj * frag_adj * regime_adj
         return round(max(1.0, min(10.0, size)), 2)
+
+    def _estimate_win_prob(self, scores: dict, rec, bullish: bool) -> float:
+        """Multi-factor win probability combining composite, agreement, and quality."""
+        composite = self._sv(scores, "composite_opportunity")
+        # Base directional component from composite (±0.25 range)
+        if bullish:
+            base_prob = 0.5 + (composite - 50) / 200
+        else:
+            base_prob = 0.5 + (50 - composite) / 200
+        # Agreement bonus: high signal agreement → higher confidence in direction
+        agreement_bonus = (rec.signal_agreement_pct - 50) / 500 if rec.signal_agreement_pct > 50 else 0
+        # Quality bonus: high trade quality → historically better outcomes
+        quality_bonus = (rec.trade_quality_score - 50) / 500 if rec.trade_quality_score > 50 else 0
+        # Fragility penalty: high fragility → less reliable signal
+        fragility_penalty = max(0, (rec.fragility_score - 50)) / 500
+        win_prob = base_prob + agreement_bonus + quality_bonus - fragility_penalty
+        return max(0.15, min(0.85, win_prob))
 
     @staticmethod
     def _compute_max_loss_pct(price: float, stop_price: float | None, position_pct: float | None, long: bool) -> float:

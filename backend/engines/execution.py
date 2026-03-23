@@ -96,7 +96,10 @@ class ExecutionEngine:
         snap.ask_depth_dollars = volume_data.get("ask_depth", 450_000)
         if snap.bid_depth_dollars and snap.ask_depth_dollars:
             total = snap.bid_depth_dollars + snap.ask_depth_dollars
-            snap.depth_imbalance = round((snap.bid_depth_dollars - snap.ask_depth_dollars) / total, 4) if total > 0 else 0
+            if total > 0:
+                snap.depth_imbalance = round((snap.bid_depth_dollars - snap.ask_depth_dollars) / total, 4)
+            else:
+                snap.depth_imbalance = None  # No liquidity — unknown, not neutral
 
         # Slippage estimation (square-root model)
         adv_dollars = (snap.avg_daily_volume or 1) * price
@@ -207,18 +210,25 @@ class ExecutionEngine:
         lows = [b.get("low", 0) for b in recent]
         closes = [b.get("close", 0) for b in recent]
         if not all(highs) or not all(lows) or not all(closes):
+            snap.chop_trend_regime = "unknown"
             return
         # ATR sum
-        atr_sum = sum(h - l for h, l in zip(highs, lows))
+        atr_sum = sum(max(h - l, 0) for h, l in zip(highs, lows))
         # Range
         highest = max(highs)
         lowest = min(lows)
         total_range = highest - lowest
-        if total_range <= 0 or atr_sum <= 0:
+        if total_range <= 1e-10 or atr_sum <= 1e-10:
+            snap.chop_index = 100.0  # flat price = maximum chop
+            snap.chop_trend_regime = "chop"
             return
         # Choppiness Index = 100 * LOG10(ATR_sum / range) / LOG10(14)
         import math
-        ci = 100 * math.log10(atr_sum / total_range) / math.log10(14)
+        ratio = atr_sum / total_range
+        if ratio <= 0:
+            snap.chop_trend_regime = "unknown"
+            return
+        ci = 100 * math.log10(ratio) / math.log10(14)
         snap.chop_index = round(max(0, min(100, ci)), 1)
         if ci > 61.8:
             snap.chop_trend_regime = "chop"
