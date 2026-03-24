@@ -185,5 +185,27 @@ class DataProvider:
         }
 
 
-# Singleton
-data_provider = DataProvider()
+# Lazy singleton — deferred to first use so import-time side effects are avoided
+_data_provider: DataProvider | None = None
+
+
+def get_data_provider() -> DataProvider:
+    """Return the singleton DataProvider, creating it on first call."""
+    global _data_provider
+    if _data_provider is None:
+        _data_provider = DataProvider()
+    return _data_provider
+
+
+# Backwards-compatible alias for existing imports
+data_provider = None  # type: ignore[assignment]
+
+
+class _LazyProxy:
+    """Transparent proxy that defers DataProvider creation to first attribute access."""
+
+    def __getattr__(self, name: str):
+        return getattr(get_data_provider(), name)
+
+
+data_provider = _LazyProxy()  # type: ignore[assignment]

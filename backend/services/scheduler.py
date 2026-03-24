@@ -57,6 +57,11 @@ class SchedulerService:
                 )
             )
 
+        # DB retention cleanup — run daily (every 24h)
+        self._tasks["db_retention"] = asyncio.create_task(
+            self._periodic("db_retention", 86400, self._run_retention_cleanup)
+        )
+
         # Polygon real-time streaming (if configured)
         if settings.has_polygon() and settings.polygon_plan != "basic":
             self._tasks["polygon_streaming"] = asyncio.create_task(
@@ -115,6 +120,14 @@ class SchedulerService:
             logger.info("Polygon streaming not available (aiohttp not installed)")
         except Exception as e:
             logger.error("Polygon streaming failed: %s", e)
+
+    @staticmethod
+    async def _run_retention_cleanup():
+        """Delete old analysis records per retention policy."""
+        from backend.services.database import cleanup_old_records
+        deleted = await cleanup_old_records()
+        if deleted:
+            logger.info("Retention cleanup removed %d old records", deleted)
 
     def get_latest_price(self, ticker: str) -> float | None:
         """Get latest streaming price for a ticker."""

@@ -1,12 +1,16 @@
 """
 Database Connection Service — Async SQLAlchemy engine and session management.
 Falls back gracefully when no database is available.
+Includes Alembic migration support and retention policy.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from contextlib import asynccontextmanager
+
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +18,12 @@ _engine = None
 _session_factory = None
 _db_available = False
 
+# Retention: keep analysis records for this many days (0 = keep forever)
+RETENTION_DAYS = 90
+
 
 async def init_db():
-    """Initialize database connection. Fails gracefully if unavailable."""
+    """Initialize database connection and run Alembic migrations."""
     global _engine, _session_factory, _db_available
 
     try:
@@ -34,14 +41,32 @@ async def init_db():
         _db_available = True
         logger.info("Database connection established")
 
-        # Create tables if they don't exist
-        from backend.models.analysis import Base
-        async with _engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables verified/created")
+        # Run Alembic migrations (creates/updates tables)
+        await _run_migrations()
+        logger.info("Database migrations applied")
     except Exception as e:
         logger.warning("Database not available, running in stateless mode: %s", e)
         _db_available = False
+
+
+async def _run_migrations():
+    """Run Alembic migrations programmatically. Falls back to create_all."""
+    try:
+        from alembic.config import Config
+        from alembic import command
+        import asyncio
+
+        def _do_upgrade():
+            alembic_cfg = Config("alembic.ini")
+            command.upgrade(alembic_cfg, "head")
+
+        await asyncio.to_thread(_do_upgrade)
+    except Exception as e:
+        logger.warning("Alembic migration failed, falling back to create_all: %s", e)
+        # Fallback: create tables directly (development convenience)
+        from backend.models import Base
+        async with _engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
 
 
 async def close_db():
@@ -121,3 +146,30 @@ async def save_analysis(analysis_dict: dict) -> bool:
     except Exception as e:
         logger.warning("Failed to save analysis: %s", e)
         return False
+
+
+async def cleanup_old_records(days: int | None = None) -> int:
+    """Delete analysis records older than `days` days. Returns count deleted."""
+    if not _db_available:
+        return 0
+    retention = days if days is not None else RETENTION_DAYS
+    if retention <= 0:
+        return 0
+    try:
+        cutoff = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=retention)
+        async with get_session() as session:
+            if session is None:
+                return 0
+            result = await session.execute(
+                text(
+                    "DELETE FROM analysis_records WHERE timestamp < :cutoff"
+                ),
+                {"cutoff": cutoff},
+            )
+            deleted = result.rowcount
+            if deleted:
+                logger.info("Retention cleanup: deleted %d records older than %d days", deleted, retention)
+            return deleted
+    except Exception as e:
+        logger.warning("Retention cleanup failed: %s", e)
+        return 0

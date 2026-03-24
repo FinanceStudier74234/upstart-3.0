@@ -497,6 +497,45 @@ class TestProbabilityEngine:
         assert snap.prob_above_target is not None
         assert snap.prob_below_stop is not None
 
+    def test_analyze_with_precomputed_garch(self):
+        """ProbabilityEngine should use a pre-computed GARCH result instead of re-fitting."""
+        from backend.engines.probability import ProbabilityEngine
+        from unittest.mock import MagicMock
+
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+
+        fake_garch = MagicMock()
+        fake_garch.garch_converged = True
+        fake_garch.conditional_volatility = np.array([0.03] * len(returns))
+
+        snap = ProbabilityEngine().analyze(
+            returns, 70.0, target=80.0, stop=65.0, garch_result=fake_garch)
+        assert snap.calibration_score == 70.0  # Should be set when GARCH is used
+        assert snap.prob_up_1w is not None
+
+    def test_analyze_with_precomputed_hmm(self):
+        """ProbabilityEngine should use a pre-computed HMM result for regime probs."""
+        from backend.engines.probability import ProbabilityEngine
+        from unittest.mock import MagicMock
+
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+
+        fake_hmm = MagicMock()
+        fake_hmm.current_regime_probabilities = {"bull": 0.6, "neutral": 0.3, "bear": 0.1}
+
+        snap = ProbabilityEngine().analyze(
+            returns, 70.0, hmm_result=fake_hmm)
+        assert snap.prob_bull_regime == pytest.approx(0.6, abs=0.01)
+        assert snap.prob_bear_regime == pytest.approx(0.1, abs=0.01)
+
+    def test_analyze_no_precomputed_still_works(self):
+        """Without pre-computed results, engine falls back to internal fitting."""
+        from backend.engines.probability import ProbabilityEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        snap = ProbabilityEngine().analyze(returns, 70.0, garch_result=None, hmm_result=None)
+        assert snap.prob_up_1w is not None
+        assert 0 <= snap.prob_up_1w <= 1
+
 
 # ── Behavioral Engine ──
 

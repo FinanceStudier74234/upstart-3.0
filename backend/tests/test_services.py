@@ -947,3 +947,63 @@ class TestSchedulerService:
         assert status["tasks"] == ["market_data"]
         assert status["last_run"]["market_data"] == "2026-03-21T12:00:00+00:00"
         assert isinstance(status["last_run"]["market_data"], str)
+
+
+# ---------------------------------------------------------------------------
+# Lazy DataProvider tests
+# ---------------------------------------------------------------------------
+
+
+class TestLazyDataProvider:
+    """Tests for the lazy-initialized DataProvider singleton."""
+
+    def test_lazy_proxy_defers_creation(self):
+        """Importing data_provider should not eagerly create a DataProvider."""
+        import backend.adapters.provider as pmod
+        # The module-level data_provider should be a _LazyProxy
+        assert type(pmod.data_provider).__name__ == "_LazyProxy"
+
+    def test_get_data_provider_returns_same_instance(self):
+        """get_data_provider() should return the same instance on repeated calls."""
+        import backend.adapters.provider as pmod
+        # Reset the cached singleton
+        pmod._data_provider = None
+        p1 = pmod.get_data_provider()
+        p2 = pmod.get_data_provider()
+        assert p1 is p2
+
+    def test_lazy_proxy_delegates_attribute(self):
+        """Accessing an attribute on the proxy should delegate to the real provider."""
+        import backend.adapters.provider as pmod
+        pmod._data_provider = None
+        # Accessing get_data_quality_summary should work through the proxy
+        summary = pmod.data_provider.get_data_quality_summary()
+        assert isinstance(summary, dict)
+        assert "mock_mode" in summary
+
+
+# ---------------------------------------------------------------------------
+# Database retention policy tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestDatabaseRetention:
+
+    async def test_cleanup_returns_zero_when_unavailable(self):
+        """cleanup_old_records should return 0 when DB is not available."""
+        from backend.services.database import cleanup_old_records
+        import backend.services.database as db_mod
+        original = db_mod._db_available
+        db_mod._db_available = False
+        try:
+            result = await cleanup_old_records()
+            assert result == 0
+        finally:
+            db_mod._db_available = original
+
+    async def test_cleanup_returns_zero_when_retention_disabled(self):
+        """cleanup_old_records(days=0) should skip cleanup."""
+        from backend.services.database import cleanup_old_records
+        result = await cleanup_old_records(days=0)
+        assert result == 0
