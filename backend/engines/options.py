@@ -89,6 +89,9 @@ class OptionsEngine:
             ]
         }
         """
+        if not chain_data or not isinstance(chain_data, dict):
+            return OptionsSnapshot(ticker=ticker, underlying_price=0.0)
+
         price = chain_data.get("underlying_price", 0)
         contracts = chain_data.get("contracts", [])
 

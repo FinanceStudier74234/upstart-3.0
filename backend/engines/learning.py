@@ -40,6 +40,9 @@ class ModelPerformance:
     model_drift_detected: bool = False
 
 
+_MAX_PREDICTIONS = 10_000  # Cap to prevent unbounded memory growth
+
+
 class LearningEngine:
     """Tracks and validates model predictions, adjusts weights."""
 
@@ -65,6 +68,18 @@ class LearningEngine:
             predicted_value=predicted,
         )
         self.predictions.append(record)
+        # Evict oldest predictions when over the cap
+        if len(self.predictions) > _MAX_PREDICTIONS:
+            # Drop oldest entries, preferring to keep unvalidated (pending) ones
+            validated = [p for p in self.predictions if p.validated]
+            unvalidated = [p for p in self.predictions if not p.validated]
+            # Keep most recent of each, respecting the cap
+            if len(unvalidated) > _MAX_PREDICTIONS:
+                # Even unvalidated alone exceed cap — trim oldest
+                self.predictions = unvalidated[-_MAX_PREDICTIONS:]
+            else:
+                keep_validated = _MAX_PREDICTIONS - len(unvalidated)
+                self.predictions = validated[-keep_validated:] + unvalidated
         return pred_id
 
     def validate_prediction(self, pred_id: str, actual_value: float):

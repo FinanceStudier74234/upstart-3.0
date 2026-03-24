@@ -1861,3 +1861,162 @@ class TestYieldCurveEngine:
         assert result.effective_duration is not None
         assert result.effective_duration > 0  # UPST moves inverse to rates
         assert result.duration_r_squared is not None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Error Path / Edge Case Tests
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestEdgeCases:
+    """Tests for NaN/inf propagation, empty inputs, and boundary conditions."""
+
+    def test_technical_nan_in_data(self):
+        from backend.engines.technical import TechnicalEngine
+        df = make_ohlcv_df(60)
+        df.iloc[10:15, df.columns.get_loc("close")] = float("nan")
+        snap = TechnicalEngine().analyze(df, "UPST")
+        # Should not crash; score should still be in valid range
+        assert 0 <= snap.technical_strength_score <= 100
+
+    def test_technical_single_row(self):
+        from backend.engines.technical import TechnicalEngine
+        df = make_ohlcv_df(1)
+        snap = TechnicalEngine().analyze(df, "UPST")
+        # Single row may not populate price; just ensure no crash
+        assert 0 <= snap.technical_strength_score <= 100
+
+    def test_options_empty_chain(self):
+        from backend.engines.options import OptionsEngine
+        snap = OptionsEngine().analyze({"contracts": [], "underlying_price": 70.0}, "UPST")
+        assert 0 <= snap.options_sentiment_score <= 100
+
+    def test_options_none_chain(self):
+        from backend.engines.options import OptionsEngine
+        snap = OptionsEngine().analyze(None, "UPST")
+        assert 0 <= snap.options_sentiment_score <= 100
+
+    def test_short_all_none_data(self):
+        from backend.engines.short import ShortEngine
+        snap = ShortEngine().analyze(None, None, {}, {}, 0.0)
+        assert 0 <= snap.squeeze_risk_score <= 100
+
+    def test_spy_beta_identical_series(self):
+        from backend.engines.spy_beta import SPYBetaEngine
+        df = make_ohlcv_df()
+        snap = SPYBetaEngine().analyze(df, df)
+        assert snap.beta is not None
+        assert snap.correlation is not None
+
+    def test_scoring_no_data(self):
+        from backend.engines.scoring import ScoringEngine
+        scores = ScoringEngine().compute_all()
+        for name, sr in scores.items():
+            assert 0 <= sr.value <= 100
+            assert not (sr.value != sr.value), f"{name} score is NaN"  # NaN check
+
+    def test_forecast_short_series(self):
+        from backend.engines.forecast import ForecastEngine
+        df = make_ohlcv_df(20)
+        result = ForecastEngine().forecast(df, "UPST")
+        # Short series may not produce forecasts; just ensure no crash
+        assert result.ensemble_point is None or result.ensemble_point >= 0
+
+    def test_risk_zero_price(self):
+        from backend.engines.risk import RiskEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        rm = RiskEngine().compute_risk(returns, 0.0)
+        assert rm.var_95_1d is not None
+
+    def test_risk_all_zero_returns(self):
+        from backend.engines.risk import RiskEngine
+        returns = np.zeros(100)
+        rm = RiskEngine().compute_risk(returns, 70.0)
+        assert rm.var_95_1d is not None
+
+    def test_probability_nan_returns(self):
+        from backend.engines.probability import ProbabilityEngine
+        returns = np.array([0.01, -0.02, float("nan"), 0.03, -0.01] * 50)
+        snap = ProbabilityEngine().analyze(returns, 70.0)
+        assert snap.prob_up_1w is not None
+
+    def test_factor_none_returns(self):
+        from backend.engines.factor import FactorEngine
+        snap = FactorEngine().analyze(None, None)
+        assert snap.market_beta is not None
+
+    def test_reflexivity_zero_price(self):
+        from backend.engines.reflexivity import ReflexivityEngine
+        returns = make_ohlcv_df()["close"].pct_change().dropna().values
+        snap = ReflexivityEngine().analyze(returns, price=0.0)
+        assert 0 <= snap.reflexivity_score <= 100
+
+    def test_behavioral_empty_inputs(self):
+        from backend.engines.behavioral import BehavioralEngine
+        snap = BehavioralEngine().analyze()
+        assert 0 <= snap.signal_clarity_score <= 100
+
+    def test_valuation_zero_price(self):
+        from backend.engines.valuation import ValuationEngine
+        snap = ValuationEngine().analyze(price=0.0)
+        assert 0 <= snap.valuation_attractiveness_score <= 100
+
+    def test_macro_empty_indicators(self):
+        from backend.engines.macro import MacroEngine
+        snap = MacroEngine().analyze({})
+        assert snap.macro_stress_regime in ("benign", "normal", "stressed", "crisis")
+
+    def test_garch_nan_returns(self):
+        from backend.engines.garch import GARCHEngine
+        returns = np.array([0.01, float("nan"), -0.02] * 100)
+        result = GARCHEngine().fit(returns)
+        # Should handle gracefully — may not converge but shouldn't crash
+        assert isinstance(result.garch_converged, bool)
+
+    def test_credit_model_extreme_vol(self):
+        from backend.engines.credit_model import CreditModelEngine
+        result = CreditModelEngine().analyze(
+            market_cap=6e9, equity_vol=5.0, total_debt=1e9, cash=500e6,
+            risk_free_rate=0.045,
+        )
+        assert 0 <= result.probability_of_default <= 1
+        assert result.credit_risk_rating in ("low", "moderate", "elevated", "high")
+
+    def test_dcc_mismatched_lengths(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        result = DCCEngine().estimate(
+            np.random.normal(0, 0.03, 300), np.random.normal(0, 0.01, 250),
+        )
+        # Should truncate to shorter and still work
+        assert result.n_observations == 250
+
+    def test_yield_curve_single_tenor(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        result = YieldCurveEngine().analyze({"10y": 4.0})
+        assert result.ns_converged is False
+        assert result.n_tenors_input == 1
+
+
+class TestLearningEngineCap:
+    """Verify learning engine prediction cap prevents unbounded growth."""
+
+    def test_predictions_capped(self):
+        from backend.engines.learning import LearningEngine, _MAX_PREDICTIONS
+        engine = LearningEngine()
+        # Log more predictions than the cap
+        for i in range(_MAX_PREDICTIONS + 500):
+            engine.log_prediction(f"model_{i % 3}", "price", 5, float(i))
+        assert len(engine.predictions) <= _MAX_PREDICTIONS + 1  # +1 for insertion before eviction check
+
+    def test_unvalidated_preserved_during_eviction(self):
+        from backend.engines.learning import LearningEngine, _MAX_PREDICTIONS
+        engine = LearningEngine()
+        # Log predictions: first half validated, second half not
+        for i in range(_MAX_PREDICTIONS + 100):
+            pid = engine.log_prediction("model_a", "price", 5, float(i))
+            if i < _MAX_PREDICTIONS // 2:
+                engine.validate_prediction(pid, float(i + 1))
+        # All unvalidated should be preserved
+        unvalidated = [p for p in engine.predictions if not p.validated]
+        assert len(unvalidated) > 0

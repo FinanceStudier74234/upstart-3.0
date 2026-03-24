@@ -28,6 +28,7 @@ class SchedulerService:
         self._streaming_client = None
         self._latest_trades: dict[str, dict] = {}  # ticker -> {data..., _ts: monotonic}
         self._latest_quotes: dict[str, dict] = {}  # ticker -> {data..., _ts: monotonic}
+        self._running_tasks: set[str] = set()  # guards against overlapping task executions
 
     async def start(self, orchestrator):
         """Start all scheduled refresh tasks + streaming."""
@@ -169,16 +170,23 @@ class SchedulerService:
         self._tasks.clear()
 
     async def _periodic(self, name: str, interval: int, func):
-        """Run a function periodically."""
+        """Run a function periodically with overlap protection."""
         while self._running:
-            try:
-                logger.debug("Running scheduled task: %s", name)
-                await func()
-                self._last_run[name] = dt.datetime.now(dt.timezone.utc).isoformat()
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error("Scheduled task %s failed: %s", name, e)
+            if name in self._running_tasks:
+                logger.warning("Skipping '%s' — previous execution still running", name)
+            else:
+                self._running_tasks.add(name)
+                try:
+                    logger.debug("Running scheduled task: %s", name)
+                    await func()
+                    self._last_run[name] = dt.datetime.now(dt.timezone.utc).isoformat()
+                except asyncio.CancelledError:
+                    self._running_tasks.discard(name)
+                    break
+                except Exception as e:
+                    logger.error("Scheduled task %s failed: %s", name, e)
+                finally:
+                    self._running_tasks.discard(name)
             await asyncio.sleep(interval)
 
     def status(self) -> dict:
