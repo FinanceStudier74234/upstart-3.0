@@ -462,6 +462,7 @@ class Orchestrator:
         # ── 6b. Advanced PhD-Level Engines ──
 
         # GARCH volatility modeling
+        garch_result = None
         if self.garch_engine and upst_returns is not None and len(upst_returns) > 100:
             garch_result = self._safe_engine_call(
                 "garch", self.garch_engine.fit, upst_returns)
@@ -469,6 +470,7 @@ class Orchestrator:
                 analysis.garch = self._snapshot_to_dict(garch_result)
 
         # HMM regime detection
+        hmm_result = None
         if self.hmm_engine and upst_returns is not None and len(upst_returns) > 60:
             hmm_result = self._safe_engine_call(
                 "hmm_regime", self.hmm_engine.fit, upst_returns)
@@ -657,6 +659,8 @@ class Orchestrator:
                 "probability", self.probability_engine.analyze,
                 upst_returns, analysis.price, target, stop,
                 short_data=analysis.short,
+                garch_result=garch_result,
+                hmm_result=hmm_result,
             )
             if prob_snap:
                 analysis.probability = self._snapshot_to_dict(prob_snap)
