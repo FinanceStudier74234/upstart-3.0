@@ -1543,3 +1543,321 @@ class TestRegimeBotEdgeCases:
         out = asyncio.run(bot.run(inp))
         # Should fall through to current_regime="crash", but regimes.get uses "normal" fallback
         assert out.results is not None
+
+
+# ═══════════════════════════════════════════════════════════════
+# Previously Untested Engines — credit_model, dcc, news_intelligence, yield_curve
+# ═══════════════════════════════════════════════════════════════
+
+
+class TestCreditModelEngine:
+    def test_analyze_basic(self):
+        from backend.engines.credit_model import CreditModelEngine
+        engine = CreditModelEngine()
+        result = engine.analyze(
+            market_cap=6e9, equity_vol=0.65, total_debt=1e9, cash=500e6,
+            risk_free_rate=0.045,
+        )
+        assert result.merton_converged is True
+        assert result.implied_asset_value > 0
+        assert result.implied_asset_volatility > 0
+        assert result.distance_to_default > 0
+        assert 0 <= result.probability_of_default <= 1
+        assert result.edf_1y >= 0
+        assert result.fair_credit_spread_bps >= 0
+        assert result.z_zone in ("safe", "grey", "distress")
+        assert result.credit_risk_rating in ("low", "moderate", "elevated", "high")
+        assert 0 <= result.credit_risk_score <= 100
+
+    def test_rate_shock_sensitivity(self):
+        from backend.engines.credit_model import CreditModelEngine
+        result = CreditModelEngine().analyze(
+            market_cap=6e9, equity_vol=0.65, total_debt=1e9, cash=500e6,
+            risk_free_rate=0.045,
+        )
+        assert len(result.pd_rate_shock) > 0
+        assert len(result.pd_spread_shock) > 0
+        assert len(result.pd_funding_stress) > 0
+        # Higher rates should generally increase PD
+        for label, pd in result.pd_rate_shock.items():
+            assert 0 <= pd <= 1, f"PD under {label} shock out of range: {pd}"
+
+    def test_maturity_profile(self):
+        from backend.engines.credit_model import CreditModelEngine
+        result = CreditModelEngine().analyze(
+            market_cap=6e9, equity_vol=0.65, total_debt=1e9, cash=500e6,
+            risk_free_rate=0.045,
+        )
+        assert len(result.maturity_profile) > 0
+        assert result.refinancing_risk_score >= 0
+        assert result.annual_refi_cost_base > 0
+        assert result.annual_refi_cost_stress >= result.annual_refi_cost_base
+
+    def test_zero_debt(self):
+        from backend.engines.credit_model import CreditModelEngine
+        result = CreditModelEngine().analyze(
+            market_cap=6e9, equity_vol=0.65, total_debt=0, cash=500e6,
+            risk_free_rate=0.045,
+        )
+        # With zero debt, Merton model can't solve
+        assert result.merton_converged is False or result.probability_of_default == 0
+
+    def test_with_fundamentals(self):
+        from backend.engines.credit_model import CreditModelEngine
+        fundies = {
+            "total_assets": 10e9, "working_capital": 500e6,
+            "retained_earnings": 200e6, "ebit": 300e6, "sales": 1.5e9,
+        }
+        result = CreditModelEngine().analyze(
+            market_cap=6e9, equity_vol=0.65, total_debt=1e9, cash=500e6,
+            risk_free_rate=0.045, fundamentals=fundies,
+        )
+        assert result.z_score != 0  # Should compute a meaningful Z-score
+        assert len(result.z_components) == 5
+
+
+class TestDCCEngine:
+    def test_estimate_basic(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        n = 252
+        spy_r = np.random.normal(0.0005, 0.01, n)
+        upst_r = 1.5 * spy_r + np.random.normal(0, 0.03, n)
+        result = DCCEngine().estimate(upst_r, spy_r)
+        assert result.n_observations == n
+        assert result.unconditional_correlation is not None
+        assert result.upst_garch_converged is True
+        assert result.spy_garch_converged is True
+        assert result.correlation_series is not None
+        assert len(result.correlation_series) == n
+        assert result.current_correlation is not None
+        assert -1 <= result.current_correlation <= 1
+        assert result.current_regime in ("decorrelated", "moderate", "high", "crisis")
+
+    def test_conditional_beta(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        n = 252
+        spy_r = np.random.normal(0.0005, 0.01, n)
+        upst_r = 1.5 * spy_r + np.random.normal(0, 0.03, n)
+        result = DCCEngine().estimate(upst_r, spy_r)
+        assert result.beta_series is not None
+        assert result.current_beta is not None
+        assert result.mean_beta is not None
+        assert result.beta_std is not None and result.beta_std >= 0
+
+    def test_correlation_forecast(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        n = 252
+        spy_r = np.random.normal(0.0005, 0.01, n)
+        upst_r = 1.5 * spy_r + np.random.normal(0, 0.03, n)
+        result = DCCEngine().estimate(upst_r, spy_r)
+        assert "t+1" in result.correlation_forecast
+        assert "t+5" in result.correlation_forecast
+        assert "t+21" in result.correlation_forecast
+        for h, val in result.correlation_forecast.items():
+            assert -1 <= val <= 1, f"Forecast {h} out of range: {val}"
+
+    def test_asymmetry(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        n = 252
+        spy_r = np.random.normal(0.0005, 0.01, n)
+        upst_r = 1.5 * spy_r + np.random.normal(0, 0.03, n)
+        result = DCCEngine().estimate(upst_r, spy_r)
+        assert result.corr_down_markets is not None
+        assert result.corr_up_markets is not None
+
+    def test_insufficient_data(self):
+        from backend.engines.dcc import DCCEngine
+        result = DCCEngine().estimate(np.array([0.01, -0.02]), np.array([0.005, -0.01]))
+        assert result.n_observations == 0
+        assert result.correlation_series is None
+
+    def test_regime_detection(self):
+        from backend.engines.dcc import DCCEngine
+        np.random.seed(42)
+        n = 252
+        spy_r = np.random.normal(0.0005, 0.01, n)
+        upst_r = 1.5 * spy_r + np.random.normal(0, 0.03, n)
+        result = DCCEngine().estimate(upst_r, spy_r)
+        assert result.regime_series is not None
+        assert len(result.regime_counts) > 0
+        assert len(result.regime_fractions) > 0
+        total_frac = sum(result.regime_fractions.values())
+        assert abs(total_frac - 1.0) < 1e-6
+
+
+class TestNewsIntelligenceEngine:
+    def test_analyze_defaults(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        engine = NewsIntelligenceEngine()
+        snap = engine.analyze()
+        assert snap.ticker == "UPST"
+        assert snap.total_article_count > 0
+        assert len(snap.articles) > 0
+        assert 0 <= snap.news_intelligence_score <= 100
+        assert snap.base_news.article_count > 0
+
+    def test_ceo_insight(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        ceo = snap.ceo_insight
+        assert ceo.name == "Dave Girouard"
+        assert ceo.tone in ("optimistic", "cautious", "neutral", "defensive", "aggressive")
+        assert ceo.activity_level in ("high", "normal", "low", "silent")
+        assert len(ceo.recent_statements) > 0
+
+    def test_ir_insight(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        ir = snap.ir_insight
+        assert ir.release_frequency in ("high", "normal", "low")
+        assert isinstance(ir.themes, list)
+
+    def test_social_sentiment(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        social = snap.social_sentiment
+        assert social.retail_sentiment_label in (
+            "very_bullish", "bullish", "neutral", "bearish", "very_bearish",
+        )
+        assert social.bull_bear_ratio > 0
+
+    def test_market_narrative(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        narrative = snap.market_narrative
+        assert narrative.dominant_narrative != "neutral"  # should be classified
+        assert 0 <= narrative.narrative_strength <= 1
+        assert narrative.catalyst_proximity in ("near", "medium", "far", "none")
+
+    def test_signals_and_risks(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        assert isinstance(snap.threat_signals, list)
+        assert isinstance(snap.opportunity_signals, list)
+        assert isinstance(snap.risk_summary, dict)
+        assert len(snap.key_headlines) <= 5
+
+    def test_analysis_notes(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze()
+        assert isinstance(snap.analysis_notes, list)
+        assert len(snap.analysis_notes) >= 1
+        assert len(snap.analysis_notes) <= 5
+
+    def test_with_custom_news(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        custom_news = [
+            {"headline": "UPST announces record Q1 revenue",
+             "source": "Reuters", "published": "2026-03-20", "sentiment": 0.8,
+             "relevance": 0.95, "category": "earnings"},
+        ]
+        snap = NewsIntelligenceEngine().analyze(news_data=custom_news)
+        assert snap.total_article_count > 0
+        assert any("record Q1" in h for h in snap.key_headlines)
+
+    def test_empty_news(self):
+        from backend.engines.news_intelligence import NewsIntelligenceEngine
+        snap = NewsIntelligenceEngine().analyze(news_data=[])
+        # Falls back to default news
+        assert snap.total_article_count > 0
+
+
+class TestYieldCurveEngine:
+    def test_analyze_full_curve(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "1m": 5.30, "3m": 5.25, "6m": 5.10, "1y": 4.80,
+            "2y": 4.50, "3y": 4.30, "5y": 4.10, "7y": 4.05,
+            "10y": 4.00, "20y": 4.20, "30y": 4.30,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert result.ns_converged is True
+        assert result.beta0 is not None
+        assert result.beta1 is not None
+        assert result.beta2 is not None
+        assert result.tau is not None and result.tau > 0
+        assert result.fitted_maturities is not None
+        assert result.fitted_yields is not None
+
+    def test_shape_classification_inverted(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "3m": 5.25, "1y": 4.80, "2y": 4.50, "5y": 4.10,
+            "10y": 4.00, "30y": 4.30,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert result.curve_shape == "inverted"
+        assert result.spread_2s10s is not None and result.spread_2s10s < 0
+
+    def test_shape_classification_normal(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "3m": 2.00, "1y": 2.50, "2y": 3.00, "5y": 3.50,
+            "10y": 4.00, "30y": 4.50,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert result.curve_shape == "normal"
+        assert result.spread_2s10s is not None and result.spread_2s10s > 0
+
+    def test_shock_scenarios(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "3m": 5.25, "1y": 4.80, "2y": 4.50, "5y": 4.10,
+            "10y": 4.00, "30y": 4.30,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert len(result.shock_scenarios) > 0
+        assert "parallel_+100bps" in result.shock_scenarios
+        assert "steepening" in result.shock_scenarios
+        assert "flattening" in result.shock_scenarios
+
+    def test_forward_rates(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "3m": 5.25, "1y": 4.80, "2y": 4.50, "5y": 4.10,
+            "10y": 4.00, "30y": 4.30,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert result.forward_1y1y is not None
+        assert result.forward_1y2y is not None
+        assert result.forward_2y3y is not None
+
+    def test_fed_funds_path(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {
+            "3m": 5.25, "1y": 4.80, "2y": 4.50, "5y": 4.10,
+            "10y": 4.00, "30y": 4.30,
+        }
+        result = YieldCurveEngine().analyze(rates)
+        assert result.fed_funds_rate is not None
+        assert result.prob_next_cut is not None
+        assert result.prob_next_hike is not None
+        assert result.prob_next_cut + result.prob_next_hike == pytest.approx(1.0, abs=1e-6)
+        # 2y (4.50) < 3m (5.25) → cuts priced in
+        assert result.cuts_priced_in is not None and result.cuts_priced_in > 0
+
+    def test_insufficient_tenors(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        rates = {"2y": 4.50, "10y": 4.00}
+        result = YieldCurveEngine().analyze(rates)
+        assert result.ns_converged is False
+        assert result.n_tenors_input == 2
+
+    def test_duration_estimation(self):
+        from backend.engines.yield_curve import YieldCurveEngine
+        np.random.seed(42)
+        rates = {
+            "3m": 5.25, "1y": 4.80, "2y": 4.50, "5y": 4.10,
+            "10y": 4.00, "30y": 4.30,
+        }
+        n = 252
+        rate_changes = np.random.normal(0, 0.02, n)
+        upst_returns = -2.0 * rate_changes + np.random.normal(0, 0.03, n)
+        result = YieldCurveEngine().analyze(rates, upst_returns, rate_changes)
+        assert result.effective_duration is not None
+        assert result.effective_duration > 0  # UPST moves inverse to rates
+        assert result.duration_r_squared is not None

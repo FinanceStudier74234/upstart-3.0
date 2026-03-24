@@ -5,6 +5,7 @@ into a unified analysis pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 from dataclasses import dataclass, field, asdict
@@ -164,6 +165,10 @@ class FullAnalysis:
     data_sources: dict = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
 
+    # Engine health
+    successful_engines: list[str] = field(default_factory=list)
+    failed_engines: list[str] = field(default_factory=list)
+
     def to_dict(self) -> dict:
         return asdict(self)
 
@@ -172,6 +177,7 @@ class Orchestrator:
     """Runs the full analysis pipeline."""
 
     def __init__(self):
+        self._current_analysis: FullAnalysis | None = None
         self.technical_engine = TechnicalEngine()
         self.options_engine = OptionsEngine()
         self.short_engine = ShortEngine()
@@ -229,42 +235,49 @@ class Orchestrator:
     async def run_full_analysis(self) -> FullAnalysis:
         """Execute the complete analysis pipeline."""
         analysis = FullAnalysis(timestamp=dt.datetime.now(dt.timezone.utc).isoformat())
+        self._current_analysis = analysis
         warnings = []
 
-        # ── 1. Fetch Data ──
+        # ── 1. Fetch Data (parallelized) ──
         logger.info("Fetching UPST and SPY data...")
-        upst_quote = await data_provider.get_quote("UPST")
-        spy_quote = await data_provider.get_quote("SPY")
-
         end = dt.date.today()
         start = end - dt.timedelta(days=365)
-        upst_bars_env = await data_provider.get_bars("UPST", "1d", start, end)
-        spy_bars_env = await data_provider.get_bars("SPY", "1d", start, end)
         intraday_start = end - dt.timedelta(days=1)
-        upst_1min_env = await data_provider.get_bars("UPST", "1min", intraday_start, end)
 
-        options_env = await data_provider.get_options_chain("UPST")
-        short_env = await data_provider.get_short_interest("UPST")
-        loan_env = await data_provider.get_stock_loan("UPST")
+        # Fetch all independent data sources concurrently
+        (
+            upst_quote, spy_quote,
+            upst_bars_env, spy_bars_env, upst_1min_env,
+            options_env, short_env, loan_env,
+            news_env, financials_env, earnings_env,
+        ) = await asyncio.gather(
+            data_provider.get_quote("UPST"),
+            data_provider.get_quote("SPY"),
+            data_provider.get_bars("UPST", "1d", start, end),
+            data_provider.get_bars("SPY", "1d", start, end),
+            data_provider.get_bars("UPST", "1min", intraday_start, end),
+            data_provider.get_options_chain("UPST"),
+            data_provider.get_short_interest("UPST"),
+            data_provider.get_stock_loan("UPST"),
+            data_provider.get_news("UPST", limit=50),
+            data_provider.get_financials("UPST"),
+            data_provider.get_earnings("UPST"),
+        )
 
-        # Fetch fundamentals and news from adapters
-        news_env = await data_provider.get_news("UPST", limit=50)
-        financials_env = await data_provider.get_financials("UPST")
-        earnings_env = await data_provider.get_earnings("UPST")
-
-        # Fetch macro indicators (multiple series)
+        # Fetch macro indicators concurrently
         macro_indicators = ["FED_FUNDS", "TREASURY_2Y", "TREASURY_10Y", "CPI_YOY",
                             "UNEMPLOYMENT", "HY_SPREAD", "IG_SPREAD", "VIX",
                             "RECESSION_PROB", "CONSUMER_DELINQUENCY", "LENDING_STANDARDS",
                             "PCE_YOY", "INITIAL_CLAIMS", "FINANCIAL_CONDITIONS"]
+        macro_envs = await asyncio.gather(
+            *[data_provider.get_macro(ind) for ind in macro_indicators]
+        )
         macro_latest = {}
         macro_env = None
-        for ind in macro_indicators:
-            env = await data_provider.get_macro(ind)
+        for ind, env in zip(macro_indicators, macro_envs):
             if macro_env is None:
                 macro_env = env  # Use first for source tracking
             if env.data and isinstance(env.data, list) and len(env.data) > 0:
-                # Get latest value from the time series
                 macro_latest[ind.lower()] = env.data[0].get("value", 0)
 
         # Track data sources
@@ -461,19 +474,19 @@ class Orchestrator:
 
         # ── 6b. Advanced PhD-Level Engines ──
 
-        # GARCH volatility modeling
+        # GARCH volatility modeling (CPU-bound — run in thread pool)
         garch_result = None
         if self.garch_engine and upst_returns is not None and len(upst_returns) > 100:
-            garch_result = self._safe_engine_call(
-                "garch", self.garch_engine.fit, upst_returns)
+            garch_result = await asyncio.to_thread(
+                self._safe_engine_call, "garch", self.garch_engine.fit, upst_returns)
             if garch_result:
                 analysis.garch = self._snapshot_to_dict(garch_result)
 
-        # HMM regime detection
+        # HMM regime detection (CPU-bound — run in thread pool)
         hmm_result = None
         if self.hmm_engine and upst_returns is not None and len(upst_returns) > 60:
-            hmm_result = self._safe_engine_call(
-                "hmm_regime", self.hmm_engine.fit, upst_returns)
+            hmm_result = await asyncio.to_thread(
+                self._safe_engine_call, "hmm_regime", self.hmm_engine.fit, upst_returns)
             if hmm_result:
                 analysis.hmm_regime = self._snapshot_to_dict(hmm_result)
 
@@ -666,6 +679,7 @@ class Orchestrator:
                 analysis.probability = self._snapshot_to_dict(prob_snap)
 
         analysis.warnings = warnings
+        self._current_analysis = None
 
         # Persist to database (non-blocking)
         try:
@@ -771,11 +785,20 @@ class Orchestrator:
         return df
 
     def _safe_engine_call(self, engine_name: str, func, *args, **kwargs):
-        """Call an engine method with error isolation — returns None on failure."""
+        """Call an engine method with error isolation — returns None on failure.
+
+        Records engine name in ``_current_analysis.successful_engines`` or
+        ``_current_analysis.failed_engines`` when set (during run_full_analysis).
+        """
         try:
-            return func(*args, **kwargs)
+            result = func(*args, **kwargs)
+            if self._current_analysis is not None:
+                self._current_analysis.successful_engines.append(engine_name)
+            return result
         except Exception as e:
             logger.error("Engine '%s' failed: %s", engine_name, e, exc_info=True)
+            if self._current_analysis is not None:
+                self._current_analysis.failed_engines.append(engine_name)
             return None
 
     def _snapshot_to_dict(self, obj: Any) -> dict:

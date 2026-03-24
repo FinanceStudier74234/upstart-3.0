@@ -8,8 +8,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import datetime as dt
+import time
 
 logger = logging.getLogger(__name__)
+
+# Maximum number of tickers to track in streaming caches
+_MAX_STREAMING_TICKERS = 200
+# TTL in seconds for streaming cache entries (10 minutes)
+_STREAMING_TTL_SECONDS = 600
 
 
 class SchedulerService:
@@ -20,8 +26,8 @@ class SchedulerService:
         self._running = False
         self._last_run: dict[str, str] = {}
         self._streaming_client = None
-        self._latest_trades: dict[str, dict] = {}  # ticker -> latest trade
-        self._latest_quotes: dict[str, dict] = {}  # ticker -> latest quote
+        self._latest_trades: dict[str, dict] = {}  # ticker -> {data..., _ts: monotonic}
+        self._latest_quotes: dict[str, dict] = {}  # ticker -> {data..., _ts: monotonic}
 
     async def start(self, orchestrator):
         """Start all scheduled refresh tasks + streaming."""
@@ -80,7 +86,9 @@ class SchedulerService:
             self._streaming_client = client
 
             def on_trade(data):
+                data["_ts"] = time.monotonic()
                 self._latest_trades[data["ticker"]] = data
+                self._evict_stale(self._latest_trades)
                 # Push to frontend via WebSocket
                 asyncio.create_task(ws_manager.broadcast({
                     "type": "price_update",
@@ -91,7 +99,9 @@ class SchedulerService:
                 }))
 
             def on_quote(data):
+                data["_ts"] = time.monotonic()
                 self._latest_quotes[data["ticker"]] = data
+                self._evict_stale(self._latest_quotes)
 
             def on_aggregate(data):
                 # Minute aggregates — trigger intraday analysis
@@ -128,6 +138,19 @@ class SchedulerService:
         deleted = await cleanup_old_records()
         if deleted:
             logger.info("Retention cleanup removed %d old records", deleted)
+
+    @staticmethod
+    def _evict_stale(cache: dict[str, dict]) -> None:
+        """Remove entries older than TTL and cap size."""
+        now = time.monotonic()
+        stale = [k for k, v in cache.items() if now - v.get("_ts", 0) > _STREAMING_TTL_SECONDS]
+        for k in stale:
+            del cache[k]
+        # Cap size: remove oldest if over limit
+        if len(cache) > _MAX_STREAMING_TICKERS:
+            by_age = sorted(cache, key=lambda k: cache[k].get("_ts", 0))
+            for k in by_age[: len(cache) - _MAX_STREAMING_TICKERS]:
+                del cache[k]
 
     def get_latest_price(self, ticker: str) -> float | None:
         """Get latest streaming price for a ticker."""

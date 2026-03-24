@@ -20,7 +20,7 @@ class WebSocketManager:
     """Manages WebSocket connections and broadcasts updates."""
 
     def __init__(self):
-        self._connections: list[WebSocket] = []
+        self._connections: set[WebSocket] = set()
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket):
@@ -31,14 +31,13 @@ class WebSocketManager:
                 logger.warning("Rejected WebSocket — max connections (%d)", MAX_CONNECTIONS)
                 return
             await websocket.accept()
-            self._connections.append(websocket)
+            self._connections.add(websocket)
             logger.info("WebSocket client connected (%d total)", len(self._connections))
 
     async def disconnect(self, websocket: WebSocket):
         """Remove a disconnected client."""
         async with self._lock:
-            if websocket in self._connections:
-                self._connections.remove(websocket)
+            self._connections.discard(websocket)
             logger.info("WebSocket client disconnected (%d remaining)", len(self._connections))
 
     async def broadcast(self, event: str, data: Any):
@@ -46,7 +45,6 @@ class WebSocketManager:
         async with self._lock:
             if not self._connections:
                 return
-            # Snapshot the list to iterate safely
             current = list(self._connections)
 
         message = json.dumps({"event": event, "data": data}, default=str)
@@ -60,9 +58,7 @@ class WebSocketManager:
 
         if disconnected:
             async with self._lock:
-                for ws in disconnected:
-                    if ws in self._connections:
-                        self._connections.remove(ws)
+                self._connections -= set(disconnected)
 
     async def send_analysis_update(self, analysis: dict):
         """Broadcast a full analysis update."""

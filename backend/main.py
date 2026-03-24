@@ -66,6 +66,11 @@ def create_app() -> FastAPI:
 
         app.add_middleware(APIKeyMiddleware)
         logger.info("API key authentication enabled for production")
+    else:
+        if settings.is_production:
+            logger.warning("Production mode without APP_SECRET_KEY — API authentication disabled!")
+        else:
+            logger.info("API key authentication disabled (non-production mode)")
 
     # Global exception handler — return structured JSON instead of raw 500
     @app.exception_handler(Exception)

@@ -127,7 +127,8 @@ const useStore = create((set, get) => ({
       const result = await api.alerts(severity)
       set({ alerts: result.alerts || [] })
     } catch (e) {
-      // silent fail for alerts
+      console.warn('Failed to fetch alerts:', e.message)
+      set({ error: `Alert fetch failed: ${e.message}` })
     }
   },
 
@@ -137,7 +138,7 @@ const useStore = create((set, get) => ({
       const { alerts } = get()
       set({ alerts: alerts.map(a => a.id === id ? { ...a, acknowledged: true } : a) })
     } catch (e) {
-      // silent fail
+      console.warn('Failed to acknowledge alert:', e.message)
     }
   },
 
