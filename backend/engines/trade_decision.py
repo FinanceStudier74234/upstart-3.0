@@ -9,6 +9,7 @@ import datetime as dt
 from dataclasses import dataclass, field
 
 from backend.config.constants import (
+    COMPOSITE_WEIGHTS,
     TD_MIN_TRADE_QUALITY, TD_MIN_SIGNAL_AGREEMENT,
     TD_COMPOSITE_BULLISH, TD_COMPOSITE_BEARISH,
     TD_TECH_BUY_THRESHOLD, TD_OPTIONS_BUY_THRESHOLD,
@@ -24,6 +25,9 @@ from backend.config.constants import (
     TD_FALLBACK_STOP_PCT,
     TRADE_QUALITY_BULLISH_THRESHOLD, TRADE_QUALITY_BEARISH_THRESHOLD,
 )
+
+# Derive inverted scores from COMPOSITE_WEIGHTS (negative weight = inverted)
+INVERSE_SCORES = frozenset(k for k, w in COMPOSITE_WEIGHTS.items() if w < 0)
 
 
 @dataclass
@@ -57,6 +61,10 @@ class TradeRecommendation:
     trade_quality_score: float = 0.0
     signal_agreement_pct: float = 0.0
     fragility_score: float = 0.0
+
+    # Regime context (used by sizing, not serialized to API)
+    regime_context: str = ""
+    vol_regime: str = ""
 
     # Explanation (WHY model)
     dominant_factors: list[dict] = field(default_factory=list)
@@ -138,10 +146,8 @@ class TradeDecisionEngine:
         rec.fragility_score = fragility
 
         # ── Signal Agreement ──
-        # Count all scores for agreement, but exclude inverse-direction scores
-        inverse_scores = {"macro_pressure", "credit_stress", "squeeze_risk", "positioning_fragility"}
         score_vals = self._score_values(scores)
-        directional_scores = {k: v for k, v in score_vals.items() if k not in inverse_scores}
+        directional_scores = {k: v for k, v in score_vals.items() if k not in INVERSE_SCORES}
         bullish_signals = sum(1 for v in directional_scores.values() if v > TRADE_QUALITY_BULLISH_THRESHOLD)
         bearish_signals = sum(1 for v in directional_scores.values() if v < TRADE_QUALITY_BEARISH_THRESHOLD)
         # Use directional count for agreement, not total (avoids inflation)
@@ -165,9 +171,8 @@ class TradeDecisionEngine:
         # ── Determine Direction ──
         factors = []
 
-        # Store regime context on rec for sizing
-        rec._regime_context = regime_context
-        rec._vol_regime = vol_regime
+        rec.regime_context = regime_context
+        rec.vol_regime = vol_regime
 
         if composite_val > TD_COMPOSITE_BULLISH and bullish_signals > bearish_signals:
             rec = self._bullish_decision(rec, scores, technical, options, price)
@@ -181,7 +186,7 @@ class TradeDecisionEngine:
             rec.vehicle = "common_stock" if rec.action == "hold" else "no_vehicle"
             rec.explanation = "Mixed signals. Composite near neutral."
             if price > 0:
-                atr = technical.get("atr", price * 0.04) if technical else price * 0.04
+                atr = self._get_atr(technical, price)
                 rec.stop_price = round(price - atr * TD_ATR_NEUTRAL_MULT, 2)
                 rec.target_price = round(price + atr * TD_ATR_NEUTRAL_MULT, 2)
             factors = [{"factor": "mixed_signals", "weight": 1.0, "detail": f"Composite={composite_val:.1f}"}]
@@ -222,7 +227,7 @@ class TradeDecisionEngine:
             rec.explanation = "Moderate bullish signal. Spread limits risk."
 
         if price > 0:
-            atr = technical.get("atr", price * 0.04) if technical else price * 0.04
+            atr = self._get_atr(technical, price)
             rec.target_price = round(price + atr * TD_ATR_TARGET_MULT, 2)
             rec.stop_price = round(price - atr * TD_ATR_STOP_MULT, 2)
             if rec.stop_price < price:
@@ -256,7 +261,7 @@ class TradeDecisionEngine:
             rec.explanation = "Moderate bearish conviction. Puts provide defined risk."
 
         if price > 0:
-            atr = technical.get("atr", price * 0.04) if technical else price * 0.04
+            atr = self._get_atr(technical, price)
             rec.target_price = round(price - atr * TD_ATR_TARGET_MULT, 2)
             rec.stop_price = round(price + atr * TD_ATR_STOP_MULT, 2)
             rec.invalidation_price = rec.stop_price
@@ -278,15 +283,13 @@ class TradeDecisionEngine:
         quality_adj = min(1.0, rec.trade_quality_score / TD_QUALITY_NORM)
         frag_adj = max(0.3, 1.0 - rec.fragility_score / 100)
         regime_adj = 1.0
-        regime = getattr(rec, "_regime_context", "")
-        vol_regime = getattr(rec, "_vol_regime", "")
-        if vol_regime == "crisis_vol":
+        if rec.vol_regime == "crisis_vol":
             regime_adj = TD_REGIME_CRISIS
-        elif vol_regime == "high_vol":
+        elif rec.vol_regime == "high_vol":
             regime_adj = TD_REGIME_HIGH_VOL
-        elif regime == "bear":
+        elif rec.regime_context == "bear":
             regime_adj = TD_REGIME_BEAR
-        elif regime == "bull":
+        elif rec.regime_context == "bull":
             regime_adj = TD_REGIME_BULL
         size = base * quality_adj * frag_adj * regime_adj
         return round(max(TD_MIN_POSITION_PCT, min(TD_MAX_POSITION_PCT, size)), 2)
@@ -317,8 +320,13 @@ class TradeDecisionEngine:
             return round(stop_dist * (position_pct / 100) * 100, 2)
         return round((position_pct or TD_BASE_POSITION_PCT) * TD_FALLBACK_STOP_PCT, 2)
 
+    @staticmethod
+    def _get_atr(technical: dict | None, price: float) -> float:
+        """Extract ATR from technical data, fallback to 4% of price."""
+        return technical.get("atr", price * 0.04) if technical else price * 0.04
+
     def _sv(self, scores: dict, name: str) -> float:
-        """Safely get score value."""
+        """Safely extract numeric score value from ScoreResult or dict."""
         s = scores.get(name)
         if s is None:
             return 50.0
@@ -327,33 +335,42 @@ class TradeDecisionEngine:
     def _score_values(self, scores: dict) -> dict[str, float]:
         return {k: self._sv(scores, k) for k in scores}
 
-    def _collect_bullish_factors(self, scores: dict) -> list[dict]:
+    # Factor definitions: (score_name, threshold_direction, weight, label)
+    _BULLISH_FACTORS = [
+        ("technical_strength", ">", 0.8, "technical_strength"),
+        ("funding_strength", ">", 0.7, "funding_strength"),
+        ("origination_momentum", ">", 0.7, "origination_momentum"),
+        ("options_sentiment", ">", 0.6, "options_sentiment"),
+        ("relative_strength_spy", ">", 0.5, "relative_strength_spy"),
+    ]
+
+    _BEARISH_FACTORS = [
+        ("technical_strength", "<", -0.8, "technical_weakness"),
+        ("macro_pressure", ">", -0.7, "macro_pressure"),
+        ("credit_stress", ">", -0.7, "credit_stress"),
+        ("short_opportunity", ">", -0.6, "short_opportunity"),
+        ("options_sentiment", "<", -0.6, "bearish_options_flow"),
+    ]
+
+    def _collect_factors(self, scores: dict, factor_defs: list) -> list[dict]:
         factors = []
-        if self._sv(scores, "technical_strength") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "technical_strength", "weight": 0.8, "direction": "bullish"})
-        if self._sv(scores, "funding_strength") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "funding_strength", "weight": 0.7, "direction": "bullish"})
-        if self._sv(scores, "origination_momentum") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "origination_momentum", "weight": 0.7, "direction": "bullish"})
-        if self._sv(scores, "options_sentiment") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "options_sentiment", "weight": 0.6, "direction": "bullish"})
-        if self._sv(scores, "relative_strength_spy") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "relative_strength_spy", "weight": 0.5, "direction": "bullish"})
+        for score_name, direction, weight, label in factor_defs:
+            val = self._sv(scores, score_name)
+            threshold = TRADE_QUALITY_BULLISH_THRESHOLD if direction == ">" else TRADE_QUALITY_BEARISH_THRESHOLD
+            triggered = val > threshold if direction == ">" else val < threshold
+            if triggered:
+                factors.append({
+                    "factor": label,
+                    "weight": weight,
+                    "direction": "bullish" if weight > 0 else "bearish",
+                })
         return factors
 
+    def _collect_bullish_factors(self, scores: dict) -> list[dict]:
+        return self._collect_factors(scores, self._BULLISH_FACTORS)
+
     def _collect_bearish_factors(self, scores: dict) -> list[dict]:
-        factors = []
-        if self._sv(scores, "technical_strength") < TRADE_QUALITY_BEARISH_THRESHOLD:
-            factors.append({"factor": "technical_weakness", "weight": -0.8, "direction": "bearish"})
-        if self._sv(scores, "macro_pressure") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "macro_pressure", "weight": -0.7, "direction": "bearish"})
-        if self._sv(scores, "credit_stress") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "credit_stress", "weight": -0.7, "direction": "bearish"})
-        if self._sv(scores, "short_opportunity") > TRADE_QUALITY_BULLISH_THRESHOLD:
-            factors.append({"factor": "short_opportunity", "weight": -0.6, "direction": "bearish"})
-        if self._sv(scores, "options_sentiment") < TRADE_QUALITY_BEARISH_THRESHOLD:
-            factors.append({"factor": "bearish_options_flow", "weight": -0.6, "direction": "bearish"})
-        return factors
+        return self._collect_factors(scores, self._BEARISH_FACTORS)
 
     def _identify_risks(self, scores, short, macro) -> list[str]:
         risks = []

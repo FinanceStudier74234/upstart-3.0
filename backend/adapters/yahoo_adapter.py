@@ -4,6 +4,7 @@ Uses Yahoo Finance API directly via requests (no yfinance dependency).
 
 from __future__ import annotations
 
+import asyncio
 import datetime as dt
 import logging
 from typing import Any
@@ -16,6 +17,22 @@ from backend.adapters.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _yahoo_get(url: str, **kwargs) -> requests.Response:
+    """Synchronous HTTP GET — called via asyncio.to_thread to avoid blocking."""
+    kwargs.setdefault("headers", _HEADERS)
+    resp = requests.get(url, **kwargs)
+    resp.raise_for_status()
+    return resp
+
+
+def _yahoo_raw(opt: dict, key: str, default=None):
+    """Extract raw value from Yahoo's inconsistent {raw: val} | val format."""
+    v = opt.get(key, default)
+    if isinstance(v, dict):
+        return v.get("raw", default)
+    return v
 
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0",
@@ -33,8 +50,8 @@ class YahooMarketAdapter(BaseMarketAdapter):
     async def get_quote(self, ticker: str) -> DataEnvelope:
         try:
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
-            resp = requests.get(url, headers=_HEADERS, params={"interval": "1d", "range": "2d"}, timeout=10)
-            resp.raise_for_status()
+            resp = await asyncio.to_thread(
+                _yahoo_get, url, params={"interval": "1d", "range": "2d"}, timeout=10)
             result = resp.json()["chart"]["result"][0]
             meta = result["meta"]
             data = {
@@ -65,8 +82,7 @@ class YahooMarketAdapter(BaseMarketAdapter):
 
             url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}"
             params = {"interval": yf_tf, "period1": period1, "period2": period2}
-            resp = requests.get(url, headers=_HEADERS, params=params, timeout=15)
-            resp.raise_for_status()
+            resp = await asyncio.to_thread(_yahoo_get, url, params=params, timeout=15)
             data = resp.json()["chart"]["result"][0]
 
             timestamps = data.get("timestamp", [])
@@ -106,8 +122,7 @@ class YahooMarketAdapter(BaseMarketAdapter):
     async def get_options_chain(self, ticker: str) -> DataEnvelope:
         try:
             url = f"https://query1.finance.yahoo.com/v7/finance/options/{ticker}"
-            resp = requests.get(url, headers=_HEADERS, timeout=10)
-            resp.raise_for_status()
+            resp = await asyncio.to_thread(_yahoo_get, url, timeout=10)
             result = resp.json()["optionChain"]["result"][0]
 
             underlying_price = result.get("quote", {}).get("regularMarketPrice")
@@ -123,21 +138,26 @@ class YahooMarketAdapter(BaseMarketAdapter):
                 for put in chain.get("puts", []):
                     contracts.append(_parse_yahoo_option(put, ticker, exp, "put"))
 
-            # Fetch additional expirations (up to 5 more)
-            for exp_ts in expirations_ts[1:6]:
+            # Fetch additional expirations concurrently (up to 5 more)
+            async def _fetch_expiration(exp_ts):
                 try:
-                    resp2 = requests.get(url, headers=_HEADERS,
-                                         params={"date": exp_ts}, timeout=10)
-                    resp2.raise_for_status()
-                    result2 = resp2.json()["optionChain"]["result"][0]
-                    for chain in result2.get("options", []):
-                        exp = dt.datetime.fromtimestamp(chain.get("expirationDate", 0)).strftime("%Y-%m-%d")
-                        for call in chain.get("calls", []):
-                            contracts.append(_parse_yahoo_option(call, ticker, exp, "call"))
-                        for put in chain.get("puts", []):
-                            contracts.append(_parse_yahoo_option(put, ticker, exp, "put"))
+                    r = await asyncio.to_thread(
+                        _yahoo_get, url, params={"date": exp_ts}, timeout=10)
+                    return r.json()["optionChain"]["result"][0]
                 except Exception:
+                    return None
+
+            extra_results = await asyncio.gather(
+                *[_fetch_expiration(ts) for ts in expirations_ts[1:6]])
+            for result2 in extra_results:
+                if not result2:
                     continue
+                for chain in result2.get("options", []):
+                    exp = dt.datetime.fromtimestamp(chain.get("expirationDate", 0)).strftime("%Y-%m-%d")
+                    for call in chain.get("calls", []):
+                        contracts.append(_parse_yahoo_option(call, ticker, exp, "call"))
+                    for put in chain.get("puts", []):
+                        contracts.append(_parse_yahoo_option(put, ticker, exp, "put"))
 
             return DataEnvelope(
                 data={
@@ -163,8 +183,7 @@ class YahooFundamentalAdapter(BaseFundamentalAdapter):
         try:
             url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}"
             params = {"modules": "incomeStatementHistoryQuarterly,balanceSheetHistoryQuarterly,cashflowStatementHistoryQuarterly,defaultKeyStatistics"}
-            resp = requests.get(url, headers=_HEADERS, params=params, timeout=15)
-            resp.raise_for_status()
+            resp = await asyncio.to_thread(_yahoo_get, url, params=params, timeout=15)
             result = resp.json()["quoteSummary"]["result"][0]
 
             quarters = []
@@ -211,8 +230,7 @@ class YahooFundamentalAdapter(BaseFundamentalAdapter):
         try:
             url = f"https://query1.finance.yahoo.com/v10/finance/quoteSummary/{ticker}"
             params = {"modules": "earningsHistory,earningsTrend"}
-            resp = requests.get(url, headers=_HEADERS, params=params, timeout=10)
-            resp.raise_for_status()
+            resp = await asyncio.to_thread(_yahoo_get, url, params=params, timeout=10)
             result = resp.json()["quoteSummary"]["result"][0]
 
             history = result.get("earningsHistory", {}).get("history", [])
@@ -236,13 +254,13 @@ def _parse_yahoo_option(opt: dict, ticker: str, exp: str, opt_type: str) -> dict
     return {
         "ticker": ticker,
         "option_type": opt_type,
-        "strike": opt.get("strike", {}).get("raw", 0) if isinstance(opt.get("strike"), dict) else opt.get("strike", 0),
+        "strike": _yahoo_raw(opt, "strike", 0),
         "expiration": exp,
-        "bid": opt.get("bid", {}).get("raw") if isinstance(opt.get("bid"), dict) else opt.get("bid"),
-        "ask": opt.get("ask", {}).get("raw") if isinstance(opt.get("ask"), dict) else opt.get("ask"),
-        "last": opt.get("lastPrice", {}).get("raw") if isinstance(opt.get("lastPrice"), dict) else opt.get("lastPrice"),
-        "volume": opt.get("volume", {}).get("raw", 0) if isinstance(opt.get("volume"), dict) else opt.get("volume", 0),
-        "open_interest": opt.get("openInterest", {}).get("raw", 0) if isinstance(opt.get("openInterest"), dict) else opt.get("openInterest", 0),
-        "implied_volatility": opt.get("impliedVolatility", {}).get("raw") if isinstance(opt.get("impliedVolatility"), dict) else opt.get("impliedVolatility"),
+        "bid": _yahoo_raw(opt, "bid"),
+        "ask": _yahoo_raw(opt, "ask"),
+        "last": _yahoo_raw(opt, "lastPrice"),
+        "volume": _yahoo_raw(opt, "volume", 0),
+        "open_interest": _yahoo_raw(opt, "openInterest", 0),
+        "implied_volatility": _yahoo_raw(opt, "impliedVolatility"),
         "in_the_money": opt.get("inTheMoney", False),
     }

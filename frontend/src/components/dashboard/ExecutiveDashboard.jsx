@@ -8,6 +8,28 @@ import {
   ComposedChart, Area, Line, ReferenceLine,
 } from 'recharts'
 
+// Hoisted constants — stable references, no re-creation per render
+const INVERTED_SCORES = ['macro_pressure', 'credit_stress', 'squeeze_risk', 'positioning_fragility']
+
+const CHART_TOOLTIP_STYLE = {
+  backgroundColor: '#1f2937',
+  border: '1px solid #374151',
+  borderRadius: '6px',
+  color: '#d1d5db',
+  fontSize: '11px',
+  padding: '6px 10px',
+}
+
+function formatScoreName(key) {
+  return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function actionColor(action) {
+  if ((action || '').includes('buy')) return 'text-terminal-green'
+  if ((action || '').includes('short')) return 'text-terminal-red'
+  return 'text-terminal-amber'
+}
+
 export default function ExecutiveDashboard({ analysis }) {
   const isMockData = analysis?.data_sources && Object.values(analysis.data_sources).some(s => s === 'mock')
 
@@ -32,12 +54,10 @@ export default function ExecutiveDashboard({ analysis }) {
   const priceColor = (decision.action || '').includes('buy') ? 'text-terminal-green'
     : (decision.action || '').includes('short') ? 'text-terminal-red' : 'text-terminal-text'
 
-  const invertedScores = ['macro_pressure', 'credit_stress', 'squeeze_risk', 'positioning_fragility']
-
   const radarData = useMemo(() => {
     if (!scores) return []
     return Object.entries(scores).map(([k, v]) => ({
-      subject: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      subject: formatScoreName(k),
       value: v?.value != null ? Math.round(v.value) : 0,
       fullMark: 100,
     }))
@@ -47,9 +67,9 @@ export default function ExecutiveDashboard({ analysis }) {
     if (!scores) return []
     return Object.entries(scores).map(([k, v]) => {
       const raw = v?.value != null ? Math.round(v.value) : 0
-      const isInverted = invertedScores.includes(k)
+      const isInverted = INVERTED_SCORES.includes(k)
       return {
-        name: k.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+        name: formatScoreName(k),
         score: raw,
         fill: isInverted ? (raw > 50 ? '#ef4444' : '#10b981') : (raw >= 50 ? '#10b981' : '#ef4444'),
       }
@@ -91,15 +111,6 @@ export default function ExecutiveDashboard({ analysis }) {
     return points
   }, [fc, price])
 
-  const CustomTooltipStyle = {
-    backgroundColor: '#1f2937',
-    border: '1px solid #374151',
-    borderRadius: '6px',
-    color: '#d1d5db',
-    fontSize: '11px',
-    padding: '6px 10px',
-  }
-
   return (
     <div className="space-y-4">
       {isMockData && (
@@ -120,10 +131,7 @@ export default function ExecutiveDashboard({ analysis }) {
       {/* Top Row: Key Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3">
         <Panel><Stat label="Price" value={`$${price?.toFixed(2)}`} color={priceColor} /></Panel>
-        <Panel><Stat label="Action" value={decision.action?.toUpperCase()} color={
-          (decision.action || '').includes('buy') ? 'text-terminal-green' :
-          (decision.action || '').includes('short') ? 'text-terminal-red' : 'text-terminal-amber'
-        } /></Panel>
+        <Panel><Stat label="Action" value={decision.action?.toUpperCase()} color={actionColor(decision.action)} /></Panel>
         <Panel><Stat label="Vehicle" value={decision.vehicle} /></Panel>
         <Panel><Stat label="Confidence" value={decision.confidence} /></Panel>
         <Panel><Stat label="Forecast" value={fc.ensemble_point ? `$${fc.ensemble_point}` : '--'} /></Panel>
@@ -142,7 +150,7 @@ export default function ExecutiveDashboard({ analysis }) {
               key={k}
               label={k.replace(/_/g, ' ')}
               value={v?.value}
-              inverted={invertedScores.includes(k)}
+              inverted={INVERTED_SCORES.includes(k)}
               components={v?.components}
               confidence={v?.confidence}
             />
@@ -176,7 +184,7 @@ export default function ExecutiveDashboard({ analysis }) {
                     fillOpacity={0.25}
                   />
                   <Tooltip
-                    contentStyle={CustomTooltipStyle}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     formatter={(val) => [`${val} / 100`, 'Score']}
                   />
                 </RadarChart>
@@ -208,7 +216,7 @@ export default function ExecutiveDashboard({ analysis }) {
                     tickLine={false}
                   />
                   <Tooltip
-                    contentStyle={CustomTooltipStyle}
+                    contentStyle={CHART_TOOLTIP_STYLE}
                     formatter={(val) => [`${val} / 100`, 'Score']}
                     cursor={{ fill: 'rgba(55, 65, 81, 0.4)' }}
                   />
@@ -356,7 +364,7 @@ export default function ExecutiveDashboard({ analysis }) {
                 <XAxis dataKey="name" tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }} />
                 <YAxis tick={{ fill: '#9ca3af', fontSize: 9 }} axisLine={{ stroke: '#374151' }}
                   domain={['auto', 'auto']} tickFormatter={(v) => `$${v}`} />
-                <Tooltip contentStyle={CustomTooltipStyle} formatter={(val) => [`$${val?.toFixed(2)}`, '']} />
+                <Tooltip contentStyle={CHART_TOOLTIP_STYLE} formatter={(val) => [`$${val?.toFixed(2)}`, '']} />
                 {price && <ReferenceLine y={price} stroke="#06b6d4" strokeDasharray="3 3"
                   label={{ value: `Current $${price.toFixed(2)}`, fill: '#06b6d4', fontSize: 9, position: 'right' }} />}
                 <Area dataKey="lower" stackId="range" fill="transparent" stroke="transparent" />
