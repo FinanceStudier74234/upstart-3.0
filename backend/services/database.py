@@ -30,12 +30,19 @@ async def init_db():
         from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
         from backend.config.settings import settings
 
-        _engine = create_async_engine(
-            settings.database_url,
-            echo=settings.database_echo,
-            pool_size=settings.database_pool_size,
-            pool_pre_ping=True,
-        )
+        engine_kwargs: dict = {
+            "echo": settings.database_echo,
+        }
+        if "sqlite" in settings.database_url:
+            # SQLite doesn't support pool_size; use StaticPool for async
+            from sqlalchemy.pool import StaticPool
+            engine_kwargs["poolclass"] = StaticPool
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+        else:
+            engine_kwargs["pool_size"] = settings.database_pool_size
+            engine_kwargs["pool_pre_ping"] = True
+
+        _engine = create_async_engine(settings.database_url, **engine_kwargs)
 
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
         _db_available = True
