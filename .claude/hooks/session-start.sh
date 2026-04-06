@@ -8,6 +8,12 @@ fi
 
 cd "$CLAUDE_PROJECT_DIR"
 
+# ── Ensure .env exists (copy from template if missing) ──
+if [ ! -f .env ] && [ -f .env.template ]; then
+  cp .env.template .env
+  echo "Created .env from template — add your API keys to .env for live data"
+fi
+
 # ── Python dependencies ──
 # Install core deps individually (yfinance has a known upstream build issue with multitasking)
 pip install \
